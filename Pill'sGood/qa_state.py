@@ -24,6 +24,15 @@ class QAState(TypedDict, total=False):
 
     - 과거 질문 활용
         - previous_context: 이전 질문 맥락
+        - conversation_context: 전체 대화 맥락
+        - user_context: 사용자 질문 맥락
+        - session_id: 현재 대화 세션 ID
+
+    - 대화 맥락 분석 (새로 추가)
+        - has_medicine_recommendation: Optional[bool]
+        - is_asking_about_previous: Optional[bool]
+        - extracted_medicines: Optional[dict]
+        - context_reasoning: Optional[str]
 
     - 검색 결과
         - pdf_results: PDF 검색 결과 문서 리스트
@@ -38,6 +47,15 @@ class QAState(TypedDict, total=False):
         - relevant_docs: 문서 평가 후 관련성 높은 문서 리스트
         - hallucination_flag: 환각 여부 판단 결과
         - re_query: 재검색 시 새로 생성된 질문
+
+    - LLM 기반 라우팅 (새로 추가)
+        - routing_decision: Optional[str]
+        - routing_reasoning: Optional[str]
+        - context_analysis: Optional[str]
+        - user_intent: Optional[str]
+        - search_decision: Optional[str]
+        - search_reasoning: Optional[str]
+        - search_strategy: Optional[str]
 
     - 최종 생성 결과
         - final_answer: LLM이 생성한 최종 응답 텍스트
@@ -61,6 +79,15 @@ class QAState(TypedDict, total=False):
 
     # 과거 질문 활용
     previous_context: Optional[str]
+    conversation_context: Optional[str]
+    user_context: Optional[str]
+    session_id: Optional[str]
+    
+    # 대화 맥락 분석 (새로 추가)
+    has_medicine_recommendation: Optional[bool]
+    is_asking_about_previous: Optional[bool]
+    extracted_medicines: Optional[dict]
+    context_reasoning: Optional[str]
 
     # 검색 결과
     pdf_results: Optional[List[Document]]
@@ -76,7 +103,14 @@ class QAState(TypedDict, total=False):
     hallucination_flag: Optional[bool]
     re_query: Optional[str]
 
+    # LLM 기반 라우팅 (새로 추가)
     routing_decision: Optional[str]
+    routing_reasoning: Optional[str]
+    context_analysis: Optional[str]
+    user_intent: Optional[str]
+    search_decision: Optional[str]
+    search_reasoning: Optional[str]
+    search_strategy: Optional[str]
 
     # 최종 생성 결과
     final_answer: Optional[str]

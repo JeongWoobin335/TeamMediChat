@@ -223,50 +223,36 @@ def recommend_medicine_node(state: QAState) -> QAState:
     
     candidates = []
     
-    # PDF와 Excel 데이터 모두에서 검색
-    all_docs = list(pdf_structured_docs) + list(excel_docs)
-
-    # 약품별로 중복 제거하여 처리
-    processed_products = set()
+    # Excel DB를 우선으로 검색 (Excel 우선 정책)
+    print(f"🔍 Excel DB 우선 검색 시작: {len(excel_docs)}개 문서")
     
-    # 배치 처리를 위한 약품 정보 수집
-    all_medicines_info = {}
-    
-    # 모든 약품 정보를 수집 (배치 처리를 위해)
-    for doc in all_docs:
+    # Excel에서 먼저 약품 정보 수집
+    excel_medicines_info = {}
+    for doc in excel_docs:
         name = doc.metadata.get("제품명", "")
-        
-        # 이미 처리한 약품은 건너뛰기
-        if name in processed_products:
-            continue
-            
-        # 모든 약품 정보 수집 (LLM이 의미적 매칭을 하도록)
-        medicine_info = collect_medicine_info(name, all_docs)
-        all_medicines_info[name] = medicine_info
-        processed_products.add(name)
+        if name and name not in excel_medicines_info:
+            medicine_info = collect_medicine_info(name, excel_docs)
+            excel_medicines_info[name] = medicine_info
     
-    # 디버깅을 위한 로그 추가
-    print(f"🔍 디버깅: conditions = {conditions}")
-    print(f"🔍 디버깅: all_medicines_info 개수 = {len(all_medicines_info)}")
+    print(f"✅ Excel DB에서 {len(excel_medicines_info)}개 약품 정보 수집")
     
-    # 배치 처리로 정확한 매칭 수행
+    # Excel DB에서 먼저 매칭 시도
     for condition in conditions:
-        if all_medicines_info:
-            print(f"배치 처리 중: {condition} 증상에 대한 {len(all_medicines_info)}개 약품 분석...")
-            relevant_medicines = batch_medicine_matching(all_medicines_info, condition, batch_size=15)
+        if excel_medicines_info:
+            print(f"🔍 Excel DB에서 {condition} 증상 매칭 시도...")
+            excel_relevant_medicines = batch_medicine_matching(excel_medicines_info, condition, batch_size=15)
             
-            # 배치 처리 결과로 candidates 업데이트
-            for name, is_relevant in relevant_medicines.items():
-                if is_relevant and name in all_medicines_info:
-                    medicine_info = all_medicines_info[name]
+            # Excel DB에서 매칭된 약품들을 candidates에 추가
+            for name, is_relevant in excel_relevant_medicines.items():
+                if is_relevant and name in excel_medicines_info:
+                    medicine_info = excel_medicines_info[name]
                     
                     # 신체 부위별 우려사항이 있는 경우 해당 부위 부작용이 적은 약품 우선
                     if primary_concern:
-                        # 해당 신체 부위의 위험 키워드 확인 (부작용 섹션에서만 검색)
                         concern_risk_keywords = body_part_risk_map.get(primary_concern, [])
                         concern_risk_count = sum(1 for risk in concern_risk_keywords if risk in medicine_info["부작용"].lower())
                         
-                        # 해당 부위 부작용이 적은 약품만 선택 (부작용에 관련 키워드가 1개 이하)
+                        # 해당 부위 부작용이 적은 약품만 선택
                         if concern_risk_count <= 1:
                             candidates.append({
                                 "제품명": name,
@@ -274,8 +260,9 @@ def recommend_medicine_node(state: QAState) -> QAState:
                                 "부작용": medicine_info["부작용"],
                                 "사용법": medicine_info["사용법"],
                                 f"{primary_concern}_부담도": concern_risk_count,
-                                "데이터_소스": "PDF" if any(doc.metadata.get("제품명") == name for doc in pdf_structured_docs) else "Excel"
+                                "데이터_소스": "Excel"
                             })
+                            print(f"✅ Excel 후보 추가: {name}")
                     else:
                         # 일반적인 위험 키워드 필터링
                         if not any(risk in medicine_info["부작용"].lower() for risk in all_risk_keywords):
@@ -284,13 +271,73 @@ def recommend_medicine_node(state: QAState) -> QAState:
                                 "효능": medicine_info["효능"],
                                 "부작용": medicine_info["부작용"],
                                 "사용법": medicine_info["사용법"],
-                                "데이터_소스": "PDF" if any(doc.metadata.get("제품명") == name for doc in pdf_structured_docs) else "Excel"
+                                "데이터_소스": "Excel"
                             })
-                            print(f"✅ 후보 추가: {name}")
-        else:
-            print(f"⚠️ 배치 처리 건너뜀: {condition} 증상에 대한 약품 정보가 없음")
+                            print(f"✅ Excel 후보 추가: {name}")
+    
+    # Excel DB에서 충분한 정보를 찾지 못한 경우에만 PDF 보완
+    if len(candidates) < 3:  # 최소 3개 이상의 약품이 필요
+        print(f"🔍 Excel DB에서 {len(candidates)}개 약품만 찾음, PDF DB 보완 검색...")
+        
+        # PDF에서 추가 검색
+        pdf_medicines_info = {}
+        for doc in pdf_structured_docs:
+            name = doc.metadata.get("제품명", "")
+            if name and name not in pdf_medicines_info:
+                medicine_info = collect_medicine_info(name, pdf_structured_docs)
+                pdf_medicines_info[name] = medicine_info
+        
+        print(f"✅ PDF DB에서 {len(pdf_medicines_info)}개 약품 정보 수집")
+        
+        # PDF에서 추가 매칭
+        for condition in conditions:
+            if pdf_medicines_info:
+                print(f"🔍 PDF DB에서 {condition} 증상 추가 매칭...")
+                pdf_relevant_medicines = batch_medicine_matching(pdf_medicines_info, condition, batch_size=10)
+                
+                # 이미 Excel에서 찾은 약품은 제외하고 PDF에서만 찾은 약품 추가
+                for name, is_relevant in pdf_relevant_medicines.items():
+                    if is_relevant and name in pdf_medicines_info and name not in [c["제품명"] for c in candidates]:
+                        medicine_info = pdf_medicines_info[name]
+                        
+                        # 신체 부위별 우려사항이 있는 경우 해당 부위 부작용이 적은 약품 우선
+                        if primary_concern:
+                            concern_risk_keywords = body_part_risk_map.get(primary_concern, [])
+                            concern_risk_count = sum(1 for risk in concern_risk_keywords if risk in medicine_info["부작용"].lower())
+                            
+                            if concern_risk_count <= 1:
+                                candidates.append({
+                                    "제품명": name,
+                                    "효능": medicine_info["효능"],
+                                    "부작용": medicine_info["부작용"],
+                                    "사용법": medicine_info["사용법"],
+                                    f"{primary_concern}_부담도": concern_risk_count,
+                                    "데이터_소스": "PDF"
+                                })
+                                print(f"✅ PDF 후보 추가: {name}")
+                        else:
+                            if not any(risk in medicine_info["부작용"].lower() for risk in all_risk_keywords):
+                                candidates.append({
+                                    "제품명": name,
+                                    "효능": medicine_info["효능"],
+                                    "부작용": medicine_info["부작용"],
+                                    "사용법": medicine_info["사용법"],
+                                    "데이터_소스": "PDF"
+                                })
+                                print(f"✅ PDF 후보 추가: {name}")
+                        
+                        # 충분한 약품을 찾았으면 중단
+                        if len(candidates) >= 5:
+                            break
+    else:
+        print(f"✅ Excel DB에서 충분한 약품을 찾음: {len(candidates)}개, PDF 검색 건너뜀")
 
     print(f"🔍 디버깅: 최종 candidates 개수 = {len(candidates)}")
+    print(f"🔍 데이터 소스별 통계:")
+    excel_count = sum(1 for c in candidates if c["데이터_소스"] == "Excel")
+    pdf_count = sum(1 for c in candidates if c["데이터_소스"] == "PDF")
+    print(f"  - Excel: {excel_count}개")
+    print(f"  - PDF: {pdf_count}개")
     
     if not candidates:
         state["recommendation_answer"] = f"죄송합니다. '{condition}' 병력에 적합한 {category} 관련 약품을 찾지 못했습니다."

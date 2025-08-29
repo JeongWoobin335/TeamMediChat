@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TeamMediChat - 의약품 상담 시스템</title>
+    <link rel="stylesheet" href="/static/chat.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="chat-container">
+        <!-- 사이드바 -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h2><i class="fas fa-hospital"></i> TeamMediChat</h2>
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+            </div>
+            
+            <div class="sidebar-content">
+                <!-- 새 세션 버튼 -->
+                <div class="new-session-section">
+                    <button class="new-session-btn" id="newSessionBtn">
+                        <i class="fas fa-plus"></i> 새 대화
+                    </button>
+                </div>
+                
+                <!-- 세션 목록 -->
+                <div class="sessions-section">
+                    <h3>대화 기록</h3>
+                    <div class="sessions-list" id="sessionsList">
+                        <!-- 세션들이 여기에 동적으로 추가됨 -->
+                    </div>
+                </div>
+                
+                <!-- 도움말 -->
+                <div class="help-section">
+                    <h3>도움말</h3>
+                    <div class="help-content">
+                        <p><strong>💊 의약품 질문 예시:</strong></p>
+                        <ul>
+                            <li>두통약의 부작용이 궁금해요</li>
+                            <li>감기약 추천해주세요</li>
+                            <li>혈압약 복용 중인데 주의사항이 있나요?</li>
+                        </ul>
+                        <p><strong>🔄 대화 맥락:</strong></p>
+                        <p>이전 대화 내용을 기억하여 연속된 질문에 답변합니다.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 메인 채팅 영역 -->
+        <div class="main-chat">
+            <!-- 채팅 헤더 -->
+            <div class="chat-header">
+                <div class="chat-header-left">
+                    <button class="sidebar-toggle-mobile" id="sidebarToggleMobile">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <h1>TeamMediChat</h1>
+                </div>
+                <div class="chat-header-right">
+                    <span class="session-info" id="sessionInfo">
+                        <i class="fas fa-circle"></i> 연결 중...
+                    </span>
+                </div>
+            </div>
+            
+            <!-- 채팅 메시지 영역 -->
+            <div class="chat-messages" id="chatMessages">
+                <!-- 환영 메시지 -->
+                <div class="message assistant-message">
+                    <div class="message-avatar">
+                        <i class="fas fa-hospital"></i>
+                    </div>
+                    <div class="message-content">
+                        <div class="message-text">
+                            안녕하세요! 🏥 TeamMediChat입니다.<br>
+                            의약품에 대한 질문을 자유롭게 해주세요.<br>
+                            이전 대화 내용을 기억하여 연속된 질문에도 답변할 수 있습니다.
+                        </div>
+                        <div class="message-timestamp">지금</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 채팅 입력 영역 -->
+            <div class="chat-input-container">
+                <div class="chat-input-wrapper">
+                    <textarea 
+                        id="chatInput" 
+                        placeholder="💬 질문을 입력하세요... (Shift+Enter로 줄바꿈)"
+                        rows="1"
+                        maxlength="2000"
+                    ></textarea>
+                    <button id="sendButton" class="send-button" disabled>
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+                <div class="input-info">
+                    <span class="char-count" id="charCount">0/2000</span>
+                    <span class="typing-indicator" id="typingIndicator" style="display: none;">
+                        <i class="fas fa-circle"></i> 입력 중...
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 로딩 오버레이 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>AI가 답변을 생성하고 있습니다...</p>
+        </div>
+    </div>
+    
+    <!-- 오류 모달 -->
+    <div class="error-modal" id="errorModal">
+        <div class="error-content">
+            <div class="error-header">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h3>오류 발생</h3>
+            </div>
+            <div class="error-message" id="errorMessage"></div>
+            <button class="error-close-btn" id="errorCloseBtn">확인</button>
+        </div>
+    </div>
+    
+    <script src="/static/chat.js"></script>
+</body>
+</html>

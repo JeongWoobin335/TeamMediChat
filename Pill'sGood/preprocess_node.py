@@ -5,7 +5,9 @@ import re
 
 # 유틸 함수
 def clean_product_name(query: str) -> str:
-    query = re.sub(r"(의|에 대해.*|알려줘|무엇입니까|뭔가요|뭐야|어떻게.*|사용법|부작용|효능|복용.*|섭취.*|투여.*)", "", query)
+    # 중요한 의도 키워드들은 보존
+    query = re.sub(r"(의|에 대해.*|알려줘|무엇입니까|뭔가요|뭐야|어떻게.*|사용법|복용.*|섭취.*|투여.*)", "", query)
+    # 부작용, 효능 등 중요한 키워드는 보존
     query = re.sub(r"[^\w가-힣]", "", query)
     query = re.sub(r"(은|는|이|가|을|를)$", "", query)
     return query.strip()

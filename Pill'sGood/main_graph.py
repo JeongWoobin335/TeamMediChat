@@ -18,10 +18,9 @@ from hallucination_node import hallucination_check_node
 from requery_answer_node import requery_node
 from generate_node import generate_final_answer_node
 from sns_node import sns_search_node
+
 from dotenv import load_dotenv
 from cache_manager import print_cache_stats
-
-
 
 load_dotenv()
 
@@ -46,52 +45,28 @@ builder.add_node("generate", generate_final_answer_node)
 # 진입점 설정
 builder.set_entry_point("preprocess")
 
-# 흐름 연결
+# 흐름 연결 - 원래 시스템 복원
 builder.add_edge("preprocess", "medicine_filter")
 builder.add_edge("medicine_filter", "route")
 
-# 라우팅 분기
-def route_decision_router(state: QAState):
-    return state["routing_decision"]
+# route_question_node에서 분기
+def route_decision(state: QAState):
+    routing_decision = state.get("routing_decision", "search")
+    print(f"🎯 라우팅 결정: {routing_decision}")
+    return routing_decision
 
-builder.add_conditional_edges("route", route_decision_router)
+builder.add_conditional_edges("route", route_decision)
 
 # 추천 흐름: 추천 후 곧바로 generate
 builder.add_edge("recommend", "generate")
 
-# 정보 검색 흐름 - 최신 정보 요청 감지
-def search_router(state: QAState):
-    category = state.get("category", "")
-    query = (state.get("query", "") or "").lower()
-    
-    # 최신 약품 정보 요청인 경우 SNS 검색 우선 (PDF/Excel 건너뛰기)
-    latest_keywords = ["2024", "2023", "새로", "신약", "fda", "승인", "최신", "새로운", "경험담", "후기", 
-                      "latest", "new", "recent", "experience", "review", "side effect"]
-    if (category == "최신 약품" or 
-        any(keyword in query for keyword in latest_keywords)):
-        return "external_search"
-    
-    # 일반 정보 요청인 경우 PDF 검색부터 시작
-    return "pdf_search"
+# SNS 검색 흐름: sns_search 후 곧바로 generate (유튜브 검색 결과를 바로 사용)
+builder.add_edge("sns_search", "generate")
 
-builder.add_conditional_edges("search", search_router)
-
-def pdf_router(state: QAState):
-    query = (state.get("cleaned_query") or state.get("normalized_query") or "").lower()
-    docs = state.get("pdf_results") or []
-    return "rerank" if any(query in doc.page_content.lower() for doc in docs) else "excel_search"
-
-builder.add_conditional_edges("pdf_search", pdf_router)
-
-def excel_router(state: QAState):
-    docs = state.get("excel_results") or []
-    return "rerank" if len(docs) > 0 else "external_search"
-
-builder.add_conditional_edges("excel_search", excel_router)
-
-# 공통 후속 흐름
-builder.add_edge("external_search", "sns_search")
-builder.add_edge("sns_search", "rerank")
+# 일반 검색 흐름
+builder.add_edge("excel_search", "rerank")
+builder.add_edge("pdf_search", "rerank")
+builder.add_edge("external_search", "rerank")
 builder.add_edge("rerank", "hallucination")
 
 def hallucination_router(state: QAState):
@@ -107,23 +82,21 @@ builder.set_finish_point("generate")
 # 그래프 컴파일
 graph = builder.compile()
 
-# 테스트 실행
+# 실시간 대화 모드만 실행
 if __name__ == "__main__":
-    # 캐시 통계 출력
-    print_cache_stats()
+    import sys
     
-    # 테스트 쿼리 (피곤함만 테스트)
-    test_queries = [
-        "너무 지쳐서 약 먹고 싶은데 뭐가 좋을까?"
-    ]
+    print("🏥 TeamMediChat - 실시간 대화 모드")
+    print("=" * 60)
     
-    for i, test_query in enumerate(test_queries, 1):
-        test_state = QAState(query=test_query)
-        result = graph.invoke(test_state)
-        print(f"\n=== 테스트 {i} 결과 ===")
-        print(f"질문: {test_query}")
-        print(f"답변: {result.get('final_answer', '답변 없음')}")
-        print("=" * 50)
-    
-    # 테스트 후 캐시 통계 다시 출력
-    print_cache_stats()
+    try:
+        from chat_interface import ChatInterface
+        chat_interface = ChatInterface()
+        chat_interface.run()
+    except ImportError as e:
+        print(f"❌ 채팅 인터페이스를 불러올 수 없습니다: {e}")
+        print("💡 채팅 인터페이스를 사용하려면 필요한 파일들이 모두 있는지 확인하세요.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"❌ 채팅 인터페이스 실행 중 오류 발생: {e}")
+        sys.exit(1)
