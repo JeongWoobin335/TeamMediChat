@@ -158,7 +158,13 @@ def generate_final_answer_node(state: QAState) -> QAState:
         print("✅ 이미 final_answer가 설정되어 있음")
         return state
 
-    # ✅ 병력 기반 추천이 있는 경우 먼저 반환하고 종료 (우선순위 1순위)
+    # ✅ 약품 사용 가능성 판단이 있는 경우 먼저 반환하고 종료 (우선순위 1순위)
+    if state.get("usage_check_answer"):
+        print("✅ usage_check_answer 사용")
+        state["final_answer"] = state["usage_check_answer"]
+        return state
+
+    # ✅ 병력 기반 추천이 있는 경우 반환 (우선순위 2순위)
     if state.get("recommendation_answer"):
         print("✅ recommendation_answer 사용")
         state["final_answer"] = state["recommendation_answer"]

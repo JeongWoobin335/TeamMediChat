@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +7,7 @@ import asyncio
 from typing import Dict, List
 import uuid
 from datetime import datetime
+import base64
 
 # 기존 시스템 import
 from main_graph import graph
@@ -89,6 +90,51 @@ async def create_session():
         return {"session_id": session_id, "message": "새 세션이 생성되었습니다."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ocr")
+async def process_image_ocr(image: UploadFile = File(...), query: str = ""):
+    """이미지 OCR 처리 API"""
+    try:
+        # 이미지 파일 읽기
+        image_data = await image.read()
+        
+        # 이미지 크기 검증 (5MB 제한)
+        if len(image_data) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="이미지 크기는 5MB 이하여야 합니다.")
+        
+        # 이미지 타입 검증
+        if not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="이미지 파일만 업로드할 수 있습니다.")
+        
+        print(f"📸 OCR API 호출: {image.filename}, 크기: {len(image_data)} bytes")
+        
+        # OCR 처리
+        from ocr_node import extract_text_from_image, extract_medicine_name_from_text
+        
+        # 텍스트 추출
+        extracted_text = extract_text_from_image(image_data)
+        if not extracted_text:
+            return {
+                "success": False,
+                "message": "이미지에서 텍스트를 추출할 수 없습니다.",
+                "extracted_text": "",
+                "medicine_name": ""
+            }
+        
+        # 약품명 추출
+        medicine_name = extract_medicine_name_from_text(extracted_text)
+        
+        return {
+            "success": True,
+            "message": "OCR 처리 완료",
+            "extracted_text": extracted_text,
+            "medicine_name": medicine_name,
+            "filename": image.filename
+        }
+        
+    except Exception as e:
+        print(f"❌ OCR 처리 중 오류 발생: {e}")
+        raise HTTPException(status_code=500, detail=f"OCR 처리 중 오류가 발생했습니다: {str(e)}")
 
 @app.get("/api/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str, limit: int = 50):
@@ -202,6 +248,7 @@ async def handle_chat_message(websocket: WebSocket, session_id: str, message_dat
     """채팅 메시지 처리"""
     try:
         user_message = message_data["content"]
+        image_data = message_data.get("image_data")  # 이미지 데이터 추출
         
         # 사용자 메시지 브로드캐스트
         await manager.broadcast_to_session({
@@ -278,6 +325,15 @@ JSON 형식으로 응답해주세요:
                 is_asking_about_previous = False
                 found_medicines = []
             
+            # 이미지 데이터를 바이트로 변환
+            image_bytes = None
+            if image_data:
+                try:
+                    image_bytes = bytes(image_data)
+                    print(f"📸 이미지 데이터 수신: {len(image_bytes)} bytes")
+                except Exception as e:
+                    print(f"❌ 이미지 데이터 변환 오류: {e}")
+            
             # 세션 정보를 state에 추가
             initial_state = QAState(
                 query=user_message,
@@ -285,7 +341,8 @@ JSON 형식으로 응답해주세요:
                 conversation_context=full_context,
                 user_context=chat_manager.get_user_context(),
                 has_medicine_recommendation=has_medicine_recommendation,
-                is_asking_about_previous=is_asking_about_previous
+                is_asking_about_previous=is_asking_about_previous,
+                image_data=image_bytes  # 이미지 데이터 추가
             )
             
             # 그래프 실행

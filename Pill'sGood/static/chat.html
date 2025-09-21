@@ -88,7 +88,21 @@
             
             <!-- 채팅 입력 영역 -->
             <div class="chat-input-container">
+                <!-- 이미지 업로드 영역 -->
+                <div class="image-upload-section" id="imageUploadSection" style="display: none;">
+                    <div class="image-preview" id="imagePreview">
+                        <img id="previewImage" style="max-width: 200px; max-height: 150px; border-radius: 8px;">
+                        <button id="removeImageBtn" class="remove-image-btn">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                
                 <div class="chat-input-wrapper">
+                    <button id="imageUploadBtn" class="image-upload-btn" title="이미지 업로드">
+                        <i class="fas fa-camera"></i>
+                    </button>
+                    <input type="file" id="imageInput" accept="image/*" style="display: none;">
                     <textarea 
                         id="chatInput" 
                         placeholder="💬 질문을 입력하세요... (Shift+Enter로 줄바꿈)"

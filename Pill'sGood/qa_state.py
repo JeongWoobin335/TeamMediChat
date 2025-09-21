@@ -18,6 +18,11 @@ class QAState(TypedDict, total=False):
 
     - 추천 흐름
         - recommendation_answer: 병력 기반 약품 추천 결과
+    
+    - 약품 사용 가능성 판단 흐름 (새로 추가)
+        - medicine_name: 사용자가 언급한 약품명
+        - usage_context: 약품을 사용하려는 상황/증상
+        - usage_check_answer: 약품 사용 가능성 판단 결과
 
     - 관련성 판단
         - is_medicine_related: 약 관련 질문인지 여부 판단 결과
@@ -65,6 +70,10 @@ class QAState(TypedDict, total=False):
     query: str
     cleaned_query: Optional[str]
     normalized_query: Optional[str]
+    
+    # OCR 이미지 처리 관련
+    image_data: Optional[bytes]  # 업로드된 이미지 데이터
+    extracted_text: Optional[str]  # OCR로 추출된 텍스트
 
     # 전처리 정보
     condition: Optional[str]
@@ -73,6 +82,11 @@ class QAState(TypedDict, total=False):
 
     # 추천 흐름
     recommendation_answer: Optional[str]
+    
+    # 약품 사용 가능성 판단 흐름 (새로 추가)
+    medicine_name: Optional[str]
+    usage_context: Optional[str]
+    usage_check_answer: Optional[str]
 
     # 관련성 판단
     is_medicine_related: Optional[bool]

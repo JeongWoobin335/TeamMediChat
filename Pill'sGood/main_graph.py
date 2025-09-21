@@ -9,6 +9,8 @@ from preprocess_node import preprocess_query_node
 from medicine_related_filter_node import medicine_related_filter_node
 from route_question_node import route_question_node
 from recommend_medicine_node import recommend_medicine_node
+from medicine_usage_check_node import medicine_usage_check_node  # 새로운 노드 추가
+from ocr_node import ocr_image_node  # OCR 이미지 처리 노드 추가
 from remember_clean_node import remember_previous_context_node
 from pdf_node import pdf_search_node
 from excel_node import excel_search_node
@@ -32,6 +34,8 @@ builder.add_node("preprocess", preprocess_query_node)
 builder.add_node("medicine_filter", medicine_related_filter_node)
 builder.add_node("route", route_question_node)
 builder.add_node("recommend", recommend_medicine_node)
+builder.add_node("usage_check", medicine_usage_check_node)  # 새로운 노드 추가
+builder.add_node("ocr_image", ocr_image_node)  # OCR 이미지 처리 노드 추가
 builder.add_node("search", remember_previous_context_node)
 builder.add_node("pdf_search", pdf_search_node)
 builder.add_node("excel_search", excel_search_node)
@@ -45,7 +49,7 @@ builder.add_node("generate", generate_final_answer_node)
 # 진입점 설정
 builder.set_entry_point("preprocess")
 
-# 흐름 연결 - 원래 시스템 복원
+# 흐름 연결 
 builder.add_edge("preprocess", "medicine_filter")
 builder.add_edge("medicine_filter", "route")
 
@@ -60,7 +64,13 @@ builder.add_conditional_edges("route", route_decision)
 # 추천 흐름: 추천 후 곧바로 generate
 builder.add_edge("recommend", "generate")
 
-# SNS 검색 흐름: sns_search 후 곧바로 generate (유튜브 검색 결과를 바로 사용)
+# 약품 사용 가능성 판단 흐름: 사용 가능성 판단 후 곧바로 generate
+builder.add_edge("usage_check", "generate")
+
+# OCR 이미지 처리 흐름: OCR 처리 후 사용 가능성 판단으로 연결
+builder.add_edge("ocr_image", "usage_check")
+
+# SNS 검색 흐름 
 builder.add_edge("sns_search", "generate")
 
 # 일반 검색 흐름
@@ -82,7 +92,7 @@ builder.set_finish_point("generate")
 # 그래프 컴파일
 graph = builder.compile()
 
-# 실시간 대화 모드만 실행
+# 실시간 대화 모드
 if __name__ == "__main__":
     import sys
     

@@ -21,6 +21,17 @@ const newSessionBtn = document.getElementById('newSessionBtn');
 const sessionsList = document.getElementById('sessionsList');
 const sessionInfo = document.getElementById('sessionInfo');
 
+// 이미지 업로드 관련 요소들
+const imageUploadBtn = document.getElementById('imageUploadBtn');
+const imageInput = document.getElementById('imageInput');
+const imageUploadSection = document.getElementById('imageUploadSection');
+const imagePreview = document.getElementById('imagePreview');
+const previewImage = document.getElementById('previewImage');
+const removeImageBtn = document.getElementById('removeImageBtn');
+
+// 전역 변수
+let currentImageData = null;
+
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
@@ -48,6 +59,11 @@ function setupEventListeners() {
     sendButton.addEventListener('click', sendMessage);
     chatInput.addEventListener('keydown', handleKeyDown);
     chatInput.addEventListener('input', handleInput);
+    
+    // 이미지 업로드
+    imageUploadBtn.addEventListener('click', () => imageInput.click());
+    imageInput.addEventListener('change', handleImageUpload);
+    removeImageBtn.addEventListener('click', removeImage);
     
     // 사이드바 토글
     sidebarToggle.addEventListener('click', toggleSidebar);
@@ -242,13 +258,17 @@ function sendMessage() {
     // WebSocket으로 메시지 전송
     const messageData = {
         type: 'chat_message',
-        content: message
+        content: message,
+        image_data: currentImageData ? Array.from(currentImageData) : null  // 이미지 데이터 포함
     };
     
     websocket.send(JSON.stringify(messageData));
     
-    // 사용자 메시지 즉시 표시
-    displayMessage('user', message, new Date().toISOString());
+    // 사용자 메시지 즉시 표시 (이미지 포함)
+    displayMessageWithImage('user', message, new Date().toISOString(), currentImageData);
+    
+    // 이미지 초기화
+    removeImage();
     
     // 타이핑 표시 숨기기
     hideTypingIndicator();
@@ -523,6 +543,96 @@ function handleResize() {
     if (window.innerWidth > 768) {
         sidebar.classList.remove('show');
     }
+}
+
+// 이미지 업로드 처리
+function handleImageUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // 파일 타입 검증
+    if (!file.type.startsWith('image/')) {
+        showError('이미지 파일만 업로드할 수 있습니다.');
+        return;
+    }
+    
+    // 파일 크기 검증 (5MB 제한)
+    if (file.size > 5 * 1024 * 1024) {
+        showError('이미지 크기는 5MB 이하여야 합니다.');
+        return;
+    }
+    
+    // FileReader로 이미지 읽기
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const imageData = e.target.result;
+        const byteArray = new Uint8Array(e.target.result);
+        currentImageData = byteArray;
+        
+        // 이미지 미리보기 표시
+        previewImage.src = imageData;
+        imageUploadSection.style.display = 'block';
+        
+        console.log('이미지 업로드 완료:', file.name, file.size, 'bytes');
+    };
+    
+    reader.readAsArrayBuffer(file);
+}
+
+// 이미지 제거
+function removeImage() {
+    currentImageData = null;
+    imageUploadSection.style.display = 'none';
+    previewImage.src = '';
+    imageInput.value = '';
+}
+
+// 이미지가 포함된 메시지 표시
+function displayMessageWithImage(role, content, timestamp, imageData) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${role}-message`;
+    
+    const avatar = document.createElement('div');
+    avatar.className = 'message-avatar';
+    
+    if (role === 'user') {
+        avatar.innerHTML = '<i class="fas fa-user"></i>';
+    } else {
+        avatar.innerHTML = '<i class="fas fa-hospital"></i>';
+    }
+    
+    const messageContent = document.createElement('div');
+    messageContent.className = 'message-content';
+    
+    const messageText = document.createElement('div');
+    messageText.className = 'message-text';
+    messageText.textContent = content;
+    
+    // 이미지가 있는 경우 이미지 표시
+    if (imageData && role === 'user') {
+        const imageBlob = new Blob([imageData], { type: 'image/jpeg' });
+        const imageUrl = URL.createObjectURL(imageBlob);
+        
+        const messageImage = document.createElement('div');
+        messageImage.className = 'message-image';
+        messageImage.innerHTML = `
+            <img src="${imageUrl}" style="max-width: 200px; max-height: 150px; border-radius: 8px; margin-top: 10px;">
+        `;
+        messageText.appendChild(messageImage);
+    }
+    
+    const messageTimestamp = document.createElement('div');
+    messageTimestamp.className = 'message-timestamp';
+    messageTimestamp.textContent = formatTimestamp(timestamp);
+    
+    messageContent.appendChild(messageText);
+    messageContent.appendChild(messageTimestamp);
+    
+    messageDiv.appendChild(avatar);
+    messageDiv.appendChild(messageContent);
+    
+    chatMessages.appendChild(messageDiv);
+    scrollToBottom();
 }
 
 // 페이지 언로드 시 정리
