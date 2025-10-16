@@ -158,7 +158,15 @@ def generate_final_answer_node(state: QAState) -> QAState:
         print("✅ 이미 final_answer가 설정되어 있음")
         return state
 
-    # ✅ 약품 사용 가능성 판단이 있는 경우 먼저 반환하고 종료 (우선순위 1순위)
+    # ✅ 향상된 RAG 답변이 있는 경우 먼저 반환하고 종료 (최고 우선순위)
+    enhanced_answer = state.get("enhanced_rag_answer")
+    print(f"🔍 enhanced_rag_answer 확인: {enhanced_answer is not None}, 길이: {len(enhanced_answer) if enhanced_answer else 0}")
+    if enhanced_answer:
+        print("✅ enhanced_rag_answer 사용")
+        state["final_answer"] = enhanced_answer
+        return state
+    
+    # ✅ 약품 사용 가능성 판단이 있는 경우 (기존 방식)
     if state.get("usage_check_answer"):
         print("✅ usage_check_answer 사용")
         state["final_answer"] = state["usage_check_answer"]
@@ -181,32 +189,32 @@ def generate_final_answer_node(state: QAState) -> QAState:
         
         # LLM에게 맥락 기반 답변 생성 요청
         context_aware_prompt = f"""
-당신은 의약품 상담 전문가입니다.
-사용자의 질문과 대화 맥락을 분석하여 자연스럽고 유용한 답변을 생성해주세요.
+당신은 친근하고 전문적인 약사입니다. 
+사용자와 자연스러운 대화를 나누며 의약품에 대한 정확한 정보를 제공합니다.
 
-**사용자 질문:**
+**현재 사용자 질문:**
 {current_query}
 
-**대화 맥락:**
-{conversation_context[:800] if conversation_context else "없음"}
+**이전 대화 맥락:**
+{conversation_context[:1000] if conversation_context else "없음"}
 
-**사용자 질문 맥락:**
-{user_context[:400] if user_context else "없음"}
-
-**검색된 문서 정보:**
-{len(relevant_docs)}개의 관련 문서가 있습니다.
+**답변 스타일:**
+- 마치 친구나 가족과 대화하듯 자연스럽고 친근하게
+- "아, 그거 궁금하시군요!", "좋은 질문이에요!" 같은 자연스러운 반응
+- 전문적이지만 이해하기 쉬운 설명
+- 필요시 "더 궁금한 게 있으시면 언제든 물어보세요!" 같은 마무리
 
 **답변 요구사항:**
-1. 사용자의 질문에 직접적으로 답변
-2. 이전 대화 맥락과 자연스럽게 연결
-3. "그 약", "이거" 같은 대명사가 있다면 맥락에 맞게 해석
-4. 자연스럽고 대화적인 톤으로 응답
-5. 필요시 추가 질문을 유도하는 방식으로 마무리
+1. 이전 대화의 맥락을 정확히 파악하고 연결
+2. 사용자의 구체적인 질문에 직접적으로 답변
+3. 대명사나 모호한 표현이 있다면 맥락에서 추론하여 명확히 해석
+4. 티키타카가 가능한 대화형 답변
+5. 200-400자 정도의 적절한 길이
 
-**주의사항:**
-- 하드코딩된 템플릿이나 키워드 매칭을 사용하지 말 것
-- 맥락을 자연스럽게 이해하고 응답할 것
-- 사용자가 원하는 정보를 정확히 파악할 것
+**중요:**
+- 이전 대화에서 언급된 약품이나 성분이 있다면 그것을 기반으로 답변
+- 사용자가 특정 성분에 대해 물어봤다면 그 성분에만 집중해서 답변
+- 불필요하게 모든 정보를 다 나열하지 말고 질문에 맞는 정보만 제공
 """
         
         try:

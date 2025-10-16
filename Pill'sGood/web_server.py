@@ -283,7 +283,9 @@ async def handle_chat_message(websocket: WebSocket, session_id: str, message_dat
 2. 현재 질문이 이전 대화 내용을 참조하는지
 3. 대화 맥락에서 발견된 주요 약품 정보
 
-JSON 형식으로 응답해주세요:
+**중요: 코드 블록 없이 순수 JSON만 반환하세요!**
+
+출력 형식:
 {{
     "has_medicine_recommendation": true/false,
     "is_asking_about_previous": true/false,
@@ -299,9 +301,21 @@ JSON 형식으로 응답해주세요:
                     max_tokens=400
                 )
                 
+                # JSON 코드 블록 제거 (```json ... ``` 형태 처리)
+                cleaned_response = response.strip()
+                if cleaned_response.startswith('```'):
+                    # 첫 번째 줄 제거 (```json)
+                    lines = cleaned_response.split('\n')
+                    if lines[0].startswith('```'):
+                        lines = lines[1:]
+                    # 마지막 줄 제거 (```)
+                    if lines and lines[-1].strip() == '```':
+                        lines = lines[:-1]
+                    cleaned_response = '\n'.join(lines).strip()
+                
                 # JSON 응답 파싱
                 try:
-                    analysis_result = json.loads(response)
+                    analysis_result = json.loads(cleaned_response)
                     has_medicine_recommendation = analysis_result.get("has_medicine_recommendation", False)
                     is_asking_about_previous = analysis_result.get("is_asking_about_previous", False)
                     found_medicines = analysis_result.get("found_medicines", [])
@@ -311,10 +325,12 @@ JSON 형식으로 응답해주세요:
                     print(f"  - 약품 추천 포함: {has_medicine_recommendation}")
                     print(f"  - 이전 대화 참조: {is_asking_about_previous}")
                     print(f"  - 발견된 약품: {found_medicines[:3] if found_medicines else '없음'}")
-                    print(f"  - 분석 근거: {reasoning[:100]}...")
+                    print(f"  - 분석 근거: {reasoning[:100] if reasoning else '없음'}...")
                     
-                except json.JSONDecodeError:
-                    print("⚠️ 맥락 분석 결과를 JSON으로 파싱할 수 없음, 기본값 사용")
+                except json.JSONDecodeError as e:
+                    print(f"⚠️ 맥락 분석 결과를 JSON으로 파싱할 수 없음: {e}")
+                    print(f"🔍 원본 응답 (처음 200자): {response[:200]}...")
+                    print(f"🔍 정리된 응답 (처음 200자): {cleaned_response[:200]}...")
                     has_medicine_recommendation = False
                     is_asking_about_previous = False
                     found_medicines = []

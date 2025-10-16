@@ -1,0 +1,74 @@
+# enhanced_rag_node.py - 향상된 RAG 노드
+
+from qa_state import QAState
+from enhanced_rag_system import EnhancedRAGSystem
+from typing import Dict, List
+
+def enhanced_rag_node(state: QAState) -> QAState:
+    """향상된 RAG 노드 - 여러 DB에서 정보를 수집하고 조합하여 근거 있는 답변 생성"""
+    
+    medicine_name = state.get("medicine_name", "")
+    usage_context = state.get("usage_context", "")
+    
+    if not medicine_name or not usage_context:
+        state["enhanced_rag_answer"] = "죄송합니다. 약품명이나 사용 상황 정보가 부족하여 분석할 수 없습니다."
+        return state
+    
+    print(f"🔍 향상된 RAG 분석 시작: {medicine_name} → {usage_context}")
+    
+    try:
+        # 통합 RAG 시스템 초기화
+        rag_system = EnhancedRAGSystem()
+        
+        # 종합 분석 수행
+        analysis_result = rag_system.analyze_medicine_comprehensively(medicine_name, usage_context)
+        
+        # 결과를 state에 저장
+        state["enhanced_rag_analysis"] = analysis_result
+        evidence_response = analysis_result.get("evidence_based_response", "분석을 완료할 수 없습니다.")
+        state["enhanced_rag_answer"] = evidence_response
+        state["follow_up_questions"] = analysis_result.get("follow_up_questions", [])
+        
+        # 디버깅: 생성된 답변 확인
+        print(f"🔍 생성된 enhanced_rag_answer: {evidence_response[:200]}...")
+        print(f"🔍 combined_analysis 존재: {'combined_analysis' in analysis_result}")
+        if 'combined_analysis' in analysis_result:
+            print(f"🔍 combined_analysis 내용: {analysis_result['combined_analysis']}")
+        
+        # 추가 정보 저장
+        state["excel_info"] = analysis_result.get("excel_info", {})
+        state["pdf_info"] = analysis_result.get("pdf_info", {})
+        state["korean_ingredient_info"] = analysis_result.get("korean_ingredient_info", {})
+        state["international_ingredient_info"] = analysis_result.get("international_ingredient_info", {})
+        state["combined_analysis"] = analysis_result.get("combined_analysis", {})
+        
+        print(f"✅ 향상된 RAG 분석 완료: {medicine_name}")
+        
+    except Exception as e:
+        print(f"❌ 향상된 RAG 분석 오류: {e}")
+        state["enhanced_rag_answer"] = f"분석 중 오류가 발생했습니다: {str(e)}"
+        state["enhanced_rag_analysis"] = {"error": str(e)}
+    
+    return state
+
+def generate_conversational_response(state: QAState) -> str:
+    """대화형 응답 생성"""
+    
+    enhanced_answer = state.get("enhanced_rag_answer", "")
+    follow_up_questions = state.get("follow_up_questions", [])
+    
+    if not enhanced_answer:
+        return "죄송합니다. 답변을 생성할 수 없습니다."
+    
+    # 기본 답변
+    response = enhanced_answer
+    
+    # 추가 질문이 있으면 추가
+    if follow_up_questions:
+        response += "\n\n**추가로 궁금한 점이 있으시다면:**\n"
+        for i, question in enumerate(follow_up_questions[:3], 1):
+            response += f"{i}. {question}\n"
+        
+        response += "\n💬 언제든지 질문해주세요!"
+    
+    return response

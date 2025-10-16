@@ -73,6 +73,18 @@ class CacheManager:
         except:
             return False
     
+    def is_docs_cache_valid(self, source_type: str) -> bool:
+        """문서 캐시가 유효한지 확인"""
+        if source_type == "excel":
+            cache_key = self.get_cache_key(source_type, "excel_docs")
+        elif source_type == "pdf":
+            cache_key = self.get_cache_key(source_type, "pdf_docs")
+        else:
+            return False
+            
+        cache_file = self.vector_cache_dir / f"{cache_key}.pkl"
+        return cache_file.exists()
+    
     def save_vector_cache(self, source_type: str, file_paths: List[str], vector_db: FAISS):
         """벡터 DB 캐싱"""
         cache_key = self.get_cache_key(source_type, "vector_db")
@@ -186,6 +198,62 @@ class CacheManager:
         except Exception as e:
             print(f"❌ 매칭 캐시 저장 실패: {e}")
     
+    def save_excel_docs_cache(self, source_type: str, excel_docs: List[Document]):
+        """Excel 문서 리스트 캐싱"""
+        cache_key = self.get_cache_key(source_type, "excel_docs")
+        cache_file = self.vector_cache_dir / f"{cache_key}.pkl"
+        
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(excel_docs, f)
+            print(f"💾 Excel 문서 캐시 저장됨: {len(excel_docs)}개 문서")
+        except Exception as e:
+            print(f"❌ Excel 문서 캐시 저장 실패: {e}")
+    
+    def load_excel_docs_cache(self, source_type: str) -> Optional[List[Document]]:
+        """Excel 문서 리스트 캐시 로드"""
+        cache_key = self.get_cache_key(source_type, "excel_docs")
+        cache_file = self.vector_cache_dir / f"{cache_key}.pkl"
+        
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'rb') as f:
+                    excel_docs = pickle.load(f)
+                print(f"📂 Excel 문서 캐시 로드됨: {len(excel_docs)}개 문서")
+                return excel_docs
+            except Exception as e:
+                print(f"❌ Excel 문서 캐시 로드 실패: {e}")
+        
+        return None
+    
+    def save_pdf_docs_cache(self, source_type: str, pdf_docs: List[Document]):
+        """PDF 문서 리스트 캐싱"""
+        cache_key = self.get_cache_key(source_type, "pdf_docs")
+        cache_file = self.vector_cache_dir / f"{cache_key}.pkl"
+        
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(pdf_docs, f)
+            print(f"💾 PDF 문서 캐시 저장됨: {len(pdf_docs)}개 문서")
+        except Exception as e:
+            print(f"❌ PDF 문서 캐시 저장 실패: {e}")
+    
+    def load_pdf_docs_cache(self, source_type: str) -> Optional[List[Document]]:
+        """PDF 문서 리스트 캐시 로드"""
+        cache_key = self.get_cache_key(source_type, "pdf_docs")
+        cache_file = self.vector_cache_dir / f"{cache_key}.pkl"
+        
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'rb') as f:
+                    pdf_docs = pickle.load(f)
+                print(f"📂 PDF 문서 캐시 로드됨: {len(pdf_docs)}개 문서")
+                return pdf_docs
+            except Exception as e:
+                print(f"❌ PDF 문서 캐시 로드 실패: {e}")
+        
+        return None
+    
     def clear_expired_cache(self, max_age_days: int = 7):
         """만료된 캐시 정리"""
         cutoff_time = datetime.now() - timedelta(days=max_age_days)
@@ -198,11 +266,31 @@ class CacheManager:
     
     def clear_all_cache(self):
         """모든 캐시 삭제"""
-        for cache_dir in [self.vector_cache_dir, self.search_cache_dir, self.embedding_cache_dir]:
+        for cache_dir in [self.vector_cache_dir, self.search_cache_dir, self.embedding_cache_dir, self.matching_cache_dir]:
             for cache_file in cache_dir.glob("*"):
                 if cache_file.is_file():
                     cache_file.unlink()
+                elif cache_file.is_dir():
+                    import shutil
+                    shutil.rmtree(cache_file)
         print("🗑️ 모든 캐시 삭제됨")
+    
+    def clear_docs_cache(self, source_type: str):
+        """특정 소스의 문서 캐시만 삭제"""
+        if source_type == "excel":
+            cache_key = self.get_cache_key(source_type, "excel_docs")
+        elif source_type == "pdf":
+            cache_key = self.get_cache_key(source_type, "pdf_docs")
+        else:
+            print(f"❌ 지원하지 않는 소스 타입: {source_type}")
+            return
+            
+        cache_file = self.vector_cache_dir / f"{cache_key}.pkl"
+        if cache_file.exists():
+            cache_file.unlink()
+            print(f"🗑️ {source_type} 문서 캐시 삭제됨")
+        else:
+            print(f"📝 {source_type} 문서 캐시가 이미 없음")
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """캐시 통계 정보"""

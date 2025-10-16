@@ -118,7 +118,7 @@ def find_similar_medicine_name(ocr_result: str, medicine_list: List[str], cutoff
     print(f"❌ 유사도 매칭 실패: '{ocr_result}' (최고 유사도: {best_similarity:.3f})")
     return None
 
-def find_medicine_info(medicine_name: str, all_docs: List[Document]) -> dict:
+def find_medicine_info(medicine_name: str, all_docs: List[Document], is_ocr_result: bool = False) -> dict:
     """약품명으로 약품 정보를 찾아서 반환"""
     medicine_info = {
         "제품명": medicine_name,
@@ -142,31 +142,34 @@ def find_medicine_info(medicine_name: str, all_docs: List[Document]) -> dict:
         if partial_matches:
             exact_matches = partial_matches
         else:
-            # 유사도 기반 매칭 시도
-            print(f"🔍 유사도 기반 약품명 매칭 시도: '{medicine_name}'")
-            
-            # 모든 약품명 리스트 생성
-            medicine_list = [doc.metadata.get("제품명", "") for doc in all_docs if doc.metadata.get("제품명")]
-            medicine_list = list(set(medicine_list))  # 중복 제거
-            
-            # 유사도 매칭 시도
-            similar_medicine = find_similar_medicine_name(medicine_name, medicine_list, cutoff=0.8)
-            if similar_medicine:
-                print(f"✅ 유사도 매칭 성공: '{medicine_name}' → '{similar_medicine}'")
-                # 유사한 약품명으로 다시 검색
-                exact_matches = [doc for doc in all_docs if doc.metadata.get("제품명") == similar_medicine]
-                # medicine_info의 제품명을 올바른 약품명으로 업데이트
-                medicine_info["제품명"] = similar_medicine
+            # OCR 결과인 경우에만 유사도 기반 매칭 시도
+            if is_ocr_result:
+                print(f"🔍 OCR 결과 유사도 기반 약품명 매칭 시도: '{medicine_name}'")
+                
+                # 모든 약품명 리스트 생성
+                medicine_list = [doc.metadata.get("제품명", "") for doc in all_docs if doc.metadata.get("제품명")]
+                medicine_list = list(set(medicine_list))  # 중복 제거
+                
+                # 유사도 매칭 시도
+                similar_medicine = find_similar_medicine_name(medicine_name, medicine_list, cutoff=0.8)
+                if similar_medicine:
+                    print(f"✅ 유사도 매칭 성공: '{medicine_name}' → '{similar_medicine}'")
+                    # 유사한 약품명으로 다시 검색
+                    exact_matches = [doc for doc in all_docs if doc.metadata.get("제품명") == similar_medicine]
+                    # medicine_info의 제품명을 올바른 약품명으로 업데이트
+                    medicine_info["제품명"] = similar_medicine
+                else:
+                    print(f"🔍 유사도 매칭 실패: '{medicine_name}'")
+                    # 기존 정규화 방식도 시도
+                    normalized_medicine = re.sub(r"[^\w가-힣]", "", medicine_name.lower())
+                    for doc in all_docs:
+                        doc_name = doc.metadata.get("제품명", "")
+                        normalized_doc_name = re.sub(r"[^\w가-힣]", "", doc_name.lower())
+                        if normalized_medicine in normalized_doc_name or normalized_doc_name in normalized_medicine:
+                            exact_matches.append(doc)
+                            break
             else:
-                print(f"🔍 유사도 매칭 실패: '{medicine_name}'")
-                # 기존 정규화 방식도 시도
-                normalized_medicine = re.sub(r"[^\w가-힣]", "", medicine_name.lower())
-                for doc in all_docs:
-                    doc_name = doc.metadata.get("제품명", "")
-                    normalized_doc_name = re.sub(r"[^\w가-힣]", "", doc_name.lower())
-                    if normalized_medicine in normalized_doc_name or normalized_doc_name in normalized_medicine:
-                        exact_matches.append(doc)
-                        break
+                print(f"🔍 단일 텍스트 질문: 유사도 매칭 건너뜀")
     
     if not exact_matches:
         return medicine_info
@@ -220,42 +223,93 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
     # 캐시에 없으면 None 반환
     cached_result = None
     
-    # LLM을 사용한 안전성 판단
-    prompt = f"""
-당신은 의약품 안전성 전문가입니다. 다음 약품을 주어진 상황에서 사용해도 안전한지 판단해주세요.
+    # LLM을 사용한 안전성 판단 - 최적화된 프롬프트
+    prompt = f"""당신은 의약품 안전성 평가 전문가입니다. 단계별로 분석하여 근거 있는 판단을 내리세요.
 
-**약품 정보:**
+## 📋 약품 정보
 - 제품명: {medicine_info['제품명']}
 - 효능: {medicine_info['효능']}
 - 부작용: {medicine_info['부작용']}
 - 사용법: {medicine_info['사용법']}
 
-**사용 상황:**
+## 🎯 사용 상황
 {usage_context}
 
-**판단 기준:**
-1. 약품의 효능이 해당 상황에 적합한가?
-   - 효능에 명시된 증상/상황과 사용자가 언급한 상황이 의미적으로 일치하는가?
-   - 예: "육체피로" ↔ "피곤할 때", "두통" ↔ "머리가 아플 때", "감기" ↔ "감기에 걸렸을 때"
-2. 부작용이 해당 상황에서 위험하지 않은가?
-3. 사용법이 올바른가?
-4. 특별한 주의사항이 있는가?
+## 🔍 3단계 평가 프로세스
 
-**중요한 지침:**
-- 효능 정보를 꼼꼼히 분석하여 사용 상황과의 연관성을 찾으세요
-- 동의어나 유사한 표현을 고려하세요 (예: 피로 ↔ 피곤함, 두통 ↔ 머리 아픔, 습진 ↔ 피부염 ↔ 아토피)
-- 의학적으로 관련된 증상들을 의미적으로 이해하세요 (예: 습진, 아토피, 피부염, 발진, 가려움 등은 모두 피부 관련)
-- 약품의 주요 효능이 사용 상황과 일치하면 사용 가능으로 판단하세요
-- 부작용이 심각하지 않고 사용법이 적절하면 사용 가능으로 판단하세요
-- 명확한 근거를 제시하세요
+### STEP 1: 효능-증상 매칭 분석 (가장 중요)
+아래 의학적 증상 매핑을 참고하여 약품 효능과 사용 상황의 연관성을 평가하세요.
 
-다음 JSON 형식으로 응답해주세요:
+**의학적 증상 매핑:**
+- 피부 질환: 습진 ↔ 아토피 ↔ 피부염 ↔ 발진 ↔ 가려움 ↔ 두드러기
+- 상처/외상: 상처 ↔ 찰과상 ↔ 긁힘 ↔ 베인 상처 ↔ 외상 ↔ 화상
+- 통증: 두통 ↔ 편두통 ↔ 머리 아픔 / 근육통 ↔ 몸살 / 치통 ↔ 잇몸 통증
+- 피로: 피로 ↔ 피곤함 ↔ 무기력 ↔ 기운 없음 ↔ 체력 저하 ↔ 육체 피로
+- 소화: 소화불량 ↔ 체함 ↔ 속 불편 ↔ 위장 장애 ↔ 더부룩함
+- 감염: 세균 감염 ↔ 화농 ↔ 염증 ↔ 고름
+- 감기: 감기 ↔ 코감기 ↔ 목감기 ↔ 기침 ↔ 콧물 ↔ 인후통
+
+**분석 질문:**
+1. 약품 효능에 명시된 증상이 사용 상황과 직접 일치하는가?
+2. 위 매핑에서 의미적으로 유사한 증상인가?
+3. 매칭 강도: 완전일치(100%) / 강한연관(80%) / 중간연관(50%) / 약한연관(30%) / 무관(0%)
+
+**STEP 1 결과:**
+- 매칭 강도: ___%
+- 근거: [효능의 어떤 부분이 사용 상황과 연관되는지 구체적으로 설명]
+
+### STEP 2: 위험도 평가
+**부작용 심각도 점검:**
+- 심각한 부작용 있음? (쇼크, 중증 알레르기 등) → 위험
+- 일반적 부작용만 있음? (졸음, 가벼운 소화불량 등) → 보통
+- 부작용 미미 또는 없음? → 안전
+
+**사용 상황 적합성:**
+- 해당 상황에서 부작용이 치명적인가?
+- 사용법이 상황에 맞는가? (경구/외용 등)
+
+**STEP 2 결과:**
+- 위험 수준: 높음 / 보통 / 낮음
+- 근거: [구체적 설명]
+
+### STEP 3: 최종 판단
+**종합 점수 계산:**
+- 매칭 강도 ≥ 50% + 위험 수준 낮음/보통 → 사용 가능
+- 매칭 강도 < 50% 또는 위험 수준 높음 → 사용 불가
+
+**신뢰도 평가:**
+- 높음: 명확한 효능 일치 + 안전성 확인됨
+- 중간: 유사 증상 + 큰 위험 없음
+- 낮음: 효능 불명확하거나 위험 요소 있음
+
+## 💡 판단 예시
+
+### 예시 1: 베타딘 연고 + 상처
+- STEP 1: 효능 "상처 소독, 세균 감염 예방" vs 사용 "상처" → 100% 일치
+- STEP 2: 부작용 "피부 자극" → 경미, 위험 낮음
+- STEP 3: 사용 가능 (신뢰도: 높음)
+
+### 예시 2: 감기약 + 두통
+- STEP 1: 효능 "감기 증상 완화(두통, 발열)" vs 사용 "두통" → 80% 강한 연관
+- STEP 2: 부작용 "졸음" → 경미, 위험 낮음
+- STEP 3: 사용 가능 (신뢰도: 높음)
+
+### 예시 3: 피부 연고 + 근육통
+- STEP 1: 효능 "습진, 피부염 완화" vs 사용 "근육통" → 0% 무관
+- STEP 2: 효능 불일치
+- STEP 3: 사용 불가 (신뢰도: 높음)
+
+## 📤 출력 형식 (JSON)
 {{
     "safe_to_use": true/false,
-    "reason": "사용 가능/불가능한 구체적인 이유 (효능과 사용 상황의 연관성 포함)",
-    "precautions": "주의사항 (있는 경우)",
-    "alternative_suggestion": "대안 제안 (필요한 경우)"
+    "confidence_score": 0.0~1.0,
+    "matching_strength": 0~100,
+    "reason": "STEP 1-3 분석 결과를 바탕으로 한 구체적 근거 (2-3문장)",
+    "precautions": "주의사항 (필요시)",
+    "alternative_suggestion": "대안 제안 (사용 불가 시)"
 }}
+
+**중요**: 추측하지 말고 주어진 약품 정보만으로 판단하세요. 불확실하면 confidence_score를 낮추세요.
 """
     
     try:
@@ -277,13 +331,22 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
                     response = response[json_start:json_end].strip()
             
             result = json.loads(response)
-            print(f"✅ JSON 파싱 성공: {result}")
+            
+            # 새로운 필드가 없으면 기본값 추가 (하위 호환성)
+            if "confidence_score" not in result:
+                result["confidence_score"] = 0.7  # 기본 중간 신뢰도
+            if "matching_strength" not in result:
+                result["matching_strength"] = 50  # 기본 중간 매칭
+            
+            print(f"✅ JSON 파싱 성공: safe_to_use={result.get('safe_to_use')}, confidence={result.get('confidence_score')}, matching={result.get('matching_strength')}%")
         except json.JSONDecodeError as e:
             print(f"❌ JSON 파싱 실패: {e}")
             print(f"🔍 원본 응답: {response}")
             # JSON 파싱 실패 시 기본 응답
             result = {
                 "safe_to_use": False,
+                "confidence_score": 0.3,
+                "matching_strength": 0,
                 "reason": "약품 정보를 분석할 수 없습니다.",
                 "precautions": "의사나 약사와 상담하세요.",
                 "alternative_suggestion": ""
@@ -304,6 +367,8 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
         print(f"❌ 약품 사용 안전성 판단 중 오류 발생: {e}")
         return {
             "safe_to_use": False,
+            "confidence_score": 0.0,
+            "matching_strength": 0,
             "reason": "안전성 판단 중 오류가 발생했습니다.",
             "precautions": "의사나 약사와 상담하세요.",
             "alternative_suggestion": ""
@@ -340,21 +405,35 @@ def generate_usage_check_response(medicine_name: str, usage_context: str, medici
         if clean_context == usage_context:
             clean_context = usage_context.replace("?", "").strip()
     
+    # 신뢰도 및 매칭 강도 정보
+    confidence = safety_result.get("confidence_score", 0.7)
+    matching = safety_result.get("matching_strength", 50)
+    
+    # 신뢰도 레벨 표시
+    if confidence >= 0.8:
+        confidence_text = "높음 🟢"
+    elif confidence >= 0.5:
+        confidence_text = "중간 🟡"
+    else:
+        confidence_text = "낮음 🔴"
+    
     if safety_result["safe_to_use"]:
         response = f"✅ **{medicine_name}**을(를) {clean_context} 사용하는 것은 **가능**합니다.\n\n"
-        response += f"**이유:** {safety_result['reason']}\n\n"
+        response += f"**판단 근거:** {safety_result['reason']}\n\n"
+        response += f"**신뢰도:** {confidence_text} (효능 매칭: {matching}%)\n\n"
         
         if safety_result.get("precautions"):
-            response += f"**주의사항:** {safety_result['precautions']}\n\n"
+            response += f"**⚠️ 주의사항:** {safety_result['precautions']}\n\n"
     else:
         response = f"❌ **{medicine_name}**을(를) {clean_context} 사용하는 것은 **권장하지 않습니다**.\n\n"
-        response += f"**이유:** {safety_result['reason']}\n\n"
+        response += f"**판단 근거:** {safety_result['reason']}\n\n"
+        response += f"**신뢰도:** {confidence_text} (효능 매칭: {matching}%)\n\n"
         
         if safety_result.get("precautions"):
-            response += f"**주의사항:** {safety_result['precautions']}\n\n"
+            response += f"**⚠️ 주의사항:** {safety_result['precautions']}\n\n"
         
         if safety_result.get("alternative_suggestion"):
-            response += f"**대안 제안:** {safety_result['alternative_suggestion']}\n\n"
+            response += f"**💡 대안 제안:** {safety_result['alternative_suggestion']}\n\n"
     
     # 약품 정보 요약 추가
     response += "**약품 정보 요약:**\n"
@@ -378,21 +457,11 @@ def medicine_usage_check_node(state: QAState) -> QAState:
     
     print(f"🔍 약품 사용 가능성 판단 시작: {medicine_name} → {usage_context}")
     
-    # Excel DB에서 먼저 검색
+    # Excel DB에서만 검색 (PDF DB 제거)
     print("📊 Excel DB에서 약품 정보 검색 중...")
-    medicine_info = find_medicine_info(medicine_name, excel_docs)
-    
-    # Excel에서 정보를 찾지 못한 경우 PDF에서 검색
-    if medicine_info["효능"] == "정보 없음":
-        print("📄 PDF DB에서 약품 정보 검색 중...")
-        pdf_medicine_info = find_medicine_info(medicine_name, pdf_structured_docs)
-        
-        # PDF에서 찾은 정보로 업데이트
-        if pdf_medicine_info["효능"] != "정보 없음":
-            medicine_info = pdf_medicine_info
-            print(f"✅ PDF에서 {medicine_name} 정보 발견")
-        else:
-            print(f"❌ {medicine_name} 정보를 찾을 수 없음")
+    # 이미지가 포함된 경우(OCR 결과)인지 확인
+    is_ocr_result = state.get("has_image", False) or state.get("extracted_text") is not None
+    medicine_info = find_medicine_info(medicine_name, excel_docs, is_ocr_result)
     
     # 약품 정보를 찾지 못한 경우
     if medicine_info["효능"] == "정보 없음":

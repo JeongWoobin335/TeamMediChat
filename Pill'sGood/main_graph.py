@@ -8,7 +8,6 @@ from qa_state import QAState
 from preprocess_node import preprocess_query_node
 from medicine_related_filter_node import medicine_related_filter_node
 from route_question_node import route_question_node
-from recommend_medicine_node import recommend_medicine_node
 from medicine_usage_check_node import medicine_usage_check_node  # 새로운 노드 추가
 from ocr_node import ocr_image_node  # OCR 이미지 처리 노드 추가
 from remember_clean_node import remember_previous_context_node
@@ -20,6 +19,8 @@ from hallucination_node import hallucination_check_node
 from requery_answer_node import requery_node
 from generate_node import generate_final_answer_node
 from sns_node import sns_search_node
+from enhanced_rag_node import enhanced_rag_node
+from follow_up_question_node import follow_up_question_node
 
 from dotenv import load_dotenv
 from cache_manager import print_cache_stats
@@ -33,7 +34,6 @@ builder = StateGraph(QAState)
 builder.add_node("preprocess", preprocess_query_node)
 builder.add_node("medicine_filter", medicine_related_filter_node)
 builder.add_node("route", route_question_node)
-builder.add_node("recommend", recommend_medicine_node)
 builder.add_node("usage_check", medicine_usage_check_node)  # 새로운 노드 추가
 builder.add_node("ocr_image", ocr_image_node)  # OCR 이미지 처리 노드 추가
 builder.add_node("search", remember_previous_context_node)
@@ -44,6 +44,8 @@ builder.add_node("sns_search", sns_search_node)
 builder.add_node("rerank", rerank_node)
 builder.add_node("hallucination", hallucination_check_node)
 builder.add_node("requery", requery_node)
+builder.add_node("enhanced_rag", enhanced_rag_node)
+builder.add_node("follow_up", follow_up_question_node)
 builder.add_node("generate", generate_final_answer_node)
 
 # 진입점 설정
@@ -61,14 +63,18 @@ def route_decision(state: QAState):
 
 builder.add_conditional_edges("route", route_decision)
 
-# 추천 흐름: 추천 후 곧바로 generate
-builder.add_edge("recommend", "generate")
 
-# 약품 사용 가능성 판단 흐름: 사용 가능성 판단 후 곧바로 generate
-builder.add_edge("usage_check", "generate")
+# 약품 사용 가능성 판단 흐름: 사용 가능성 판단 후 향상된 RAG로
+builder.add_edge("usage_check", "enhanced_rag")
 
 # OCR 이미지 처리 흐름: OCR 처리 후 사용 가능성 판단으로 연결
 builder.add_edge("ocr_image", "usage_check")
+
+# 향상된 RAG 흐름: 향상된 RAG 후 generate로
+builder.add_edge("enhanced_rag", "generate")
+
+# 연속 질문 흐름: 연속 질문 처리 후 generate로
+builder.add_edge("follow_up", "generate")
 
 # SNS 검색 흐름 
 builder.add_edge("sns_search", "generate")

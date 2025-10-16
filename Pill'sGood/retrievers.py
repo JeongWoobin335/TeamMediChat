@@ -30,36 +30,24 @@ pdf_structured_docs = []
 pdf_product_index = {}
 
 # 캐시 확인
-if cache_manager.is_vector_cache_valid("pdf", [pdf_path]):
-    print("📂 PDF 벡터 DB 캐시 사용")
+if cache_manager.is_vector_cache_valid("pdf", [pdf_path]) and cache_manager.is_docs_cache_valid("pdf"):
+    print("📂 PDF 벡터 DB 및 문서 캐시 사용")
     pdf_vectordb = cache_manager.load_vector_cache("pdf", embedding_model)
-    if pdf_vectordb is None:
+    pdf_structured_docs = cache_manager.load_pdf_docs_cache("pdf")
+    
+    if pdf_vectordb is None or pdf_structured_docs is None:
         print("⚠️ PDF 캐시 로드 실패, 새로 생성합니다")
         pdf_vectordb = None
-    else:
-        print("📂 pdf 벡터 DB 캐시 로드됨")
-        # 캐시에서 로드된 경우에도 pdf_structured_docs 설정
-        pdf_docs_raw = PyPDFLoader(pdf_path).load()
         pdf_structured_docs = []
         pdf_product_index = {}
-
-        for doc in pdf_docs_raw:
-            blocks = re.findall(r"(\d+\.\s*.+?)(?=\n\d+\.|\Z)", doc.page_content, re.DOTALL)
-            for block in blocks:
-                name_match = re.match(r"\d+\.\s*([^\n(]+)", block)
-                if name_match:
-                    name = name_match.group(1).strip()
-                    eff = re.search(r"주요 효능[:：]\s*(.*?)(?:\n|일반적인 부작용[:：])", block, re.DOTALL)
-                    side = re.search(r"일반적인 부작용[:：]\s*(.*?)(?:\n|성인 기준 복용법[:：])", block, re.DOTALL)
-                    usage = re.search(r"성인 기준 복용법[:：]\s*(.*?)(?:\n|$)", block, re.DOTALL)
-                    content = f"[제품명]: {name}\n[효능]: {eff.group(1).strip() if eff else '정보 없음'}\n[부작용]: {side.group(1).strip() if side else '정보 없음'}\n[사용법]: {usage.group(1).strip() if usage else '정보 없음'}"
-
-                    for chunk in splitter.split_text(content):
-                        doc_obj = Document(page_content=chunk, metadata={"제품명": name})
-                        pdf_structured_docs.append(doc_obj)
-
-                    doc_full = Document(page_content=content, metadata={"제품명": name})
-                    pdf_product_index.setdefault(name, []).append(doc_full)
+    else:
+        print("📂 PDF 벡터 DB 및 문서 캐시 로드됨")
+        # pdf_product_index도 복원
+        pdf_product_index = {}
+        for doc in pdf_structured_docs:
+            name = doc.metadata.get("제품명", "")
+            if name:
+                pdf_product_index.setdefault(name, []).append(doc)
 else:
     print("🔄 PDF 벡터 DB 새로 생성")
     pdf_vectordb = None
@@ -91,6 +79,8 @@ if pdf_vectordb is None:
     # 캐시 저장 (실패해도 계속 진행)
     try:
         cache_manager.save_vector_cache("pdf", [pdf_path], pdf_vectordb)
+        cache_manager.save_pdf_docs_cache("pdf", pdf_structured_docs)
+        print("✅ PDF 벡터 DB 및 문서 캐시 저장 완료")
     except Exception as e:
         print(f"⚠️ PDF 캐시 저장 실패, 계속 진행: {e}")
 
@@ -103,9 +93,10 @@ pdf_retriever = ContextualCompressionRetriever(
 excel_files = [rf"C:\Users\jung\Desktop\11\e약은요정보검색{i}.xlsx" for i in range(1, 6)]
 required_columns = [
     "제품명",
-    "이 약의 효능은 무엇입니까?",
-    "이 약은 어떤 이상반응이 나타날 수 있습니까?",
-    "이 약은 어떻게 사용합니까?"
+    "이 약의 효능은 무엇입니까?",  # 정확한 컬럼명
+    "이 약은 어떤 이상반응이 나타날 수 있습니까?",  # 정확한 컬럼명
+    "이 약은 어떻게 사용합니까?",
+    "주성분"  # 주성분 컬럼 추가
 ]
 
 # 전역 변수 초기화
@@ -115,68 +106,31 @@ product_names = []
 product_names_normalized = []
 
 # 캐시 확인
-if cache_manager.is_vector_cache_valid("excel", excel_files):
-    print("📂 Excel 벡터 DB 캐시 사용")
+if cache_manager.is_vector_cache_valid("excel", excel_files) and cache_manager.is_docs_cache_valid("excel"):
+    print("📂 Excel 벡터 DB 및 문서 캐시 사용")
     excel_vectordb = cache_manager.load_vector_cache("excel", embedding_model)
-    if excel_vectordb is None:
+    excel_docs = cache_manager.load_excel_docs_cache("excel")
+    
+    if excel_vectordb is None or excel_docs is None:
         print("⚠️ Excel 캐시 로드 실패, 새로 생성합니다")
         excel_vectordb = None
-    else:
-        print("📂 Excel 벡터 DB 캐시 로드됨")
-        # 캐시에서 로드된 경우에도 excel_docs 설정
         excel_docs = []
         excel_product_index = {}
         product_names = []
         product_names_normalized = []
+    else:
+        print("📂 Excel 벡터 DB 및 문서 캐시 로드됨")
+        # product_names와 product_names_normalized도 복원
+        product_names = [doc.metadata.get("제품명", "") for doc in excel_docs if doc.metadata.get("제품명")]
+        product_names = list(set(product_names))  # 중복 제거
+        product_names_normalized = [re.sub(r"[^\w가-힣]", "", name.lower()) for name in product_names]
         
-        for file in excel_files:
-            if not os.path.exists(file): 
-                print(f"❌ 파일이 존재하지 않음: {file}")
-                continue
-            df = pd.read_excel(file)
-            if not all(col in df.columns for col in required_columns): 
-                print(f"❌ 필수 컬럼 누락: {[col for col in required_columns if col not in df.columns]}")
-                continue
-
-            df = df[required_columns].fillna("정보 없음")
-            for _, row in df.iterrows():
-                name = row["제품명"].strip()
-                product_names.append(name)
-                product_names_normalized.append(re.sub(r"[^\w가-힣]", "", name.lower()))
-
-                # 스마트 청크 분할: 사용법을 별도 청크로 분리하여 보존
-                efficacy = row['이 약의 효능은 무엇입니까?']
-                side_effects = row['이 약은 어떤 이상반응이 나타날 수 있습니까?']
-                usage = row['이 약은 어떻게 사용합니까?']
-                
-                # 메인 내용 (효능 + 부작용)
-                content_main = (
-                    f"[제품명]: {name}\n"
-                    f"[효능]: {efficacy}\n"
-                    f"[부작용]: {side_effects}"
-                )
-                
-                # 사용법 내용 (별도 청크)
-                content_usage = (
-                    f"[제품명]: {name}\n"
-                    f"[사용법]: {usage}"
-                )
-                
-                # 메인 청크 분할
-                main_chunks = splitter.split_text(content_main)
-                for chunk in main_chunks:
-                    doc_obj = Document(page_content=chunk, metadata={"제품명": name, "type": "main"})
-                    excel_docs.append(doc_obj)
-                
-                # 사용법 청크 분할
-                usage_chunks = splitter.split_text(content_usage)
-                for chunk in usage_chunks:
-                    doc_obj = Document(page_content=chunk, metadata={"제품명": name, "type": "usage"})
-                    excel_docs.append(doc_obj)
-
-                # 전체 내용도 보존 (검색용)
-                doc_full = Document(page_content=f"{content_main}\n{content_usage}", metadata={"제품명": name})
-                excel_product_index.setdefault(name, []).append(doc_full)
+        # excel_product_index도 복원
+        excel_product_index = {}
+        for doc in excel_docs:
+            name = doc.metadata.get("제품명", "")
+            if name:
+                excel_product_index.setdefault(name, []).append(doc)
 else:
     print("🔄 Excel 벡터 DB 새로 생성")
     excel_vectordb = None
@@ -206,10 +160,12 @@ if excel_vectordb is None:
             efficacy = row['이 약의 효능은 무엇입니까?']
             side_effects = row['이 약은 어떤 이상반응이 나타날 수 있습니까?']
             usage = row['이 약은 어떻게 사용합니까?']
+            main_ingredient = row.get('주성분', '정보 없음')  # 주성분 추가
             
             # 메인 내용 (효능 + 부작용)
             content_main = (
                 f"[제품명]: {name}\n"
+                f"[주성분]: {main_ingredient}\n"
                 f"[효능]: {efficacy}\n"
                 f"[부작용]: {side_effects}"
             )
@@ -217,19 +173,28 @@ if excel_vectordb is None:
             # 사용법 내용 (별도 청크)
             content_usage = (
                 f"[제품명]: {name}\n"
+                f"[주성분]: {main_ingredient}\n"
                 f"[사용법]: {usage}"
             )
             
             # 메인 청크 분할
             main_chunks = splitter.split_text(content_main)
             for chunk in main_chunks:
-                doc_obj = Document(page_content=chunk, metadata={"제품명": name, "type": "main"})
+                doc_obj = Document(page_content=chunk, metadata={
+                    "제품명": name, 
+                    "주성분": main_ingredient,
+                    "type": "main"
+                })
                 excel_docs.append(doc_obj)
             
             # 사용법 청크 분할 (더 큰 청크 크기 사용)
             usage_chunks = splitter.split_text(content_usage)
             for chunk in usage_chunks:
-                doc_obj = Document(page_content=chunk, metadata={"제품명": name, "type": "usage"})
+                doc_obj = Document(page_content=chunk, metadata={
+                    "제품명": name, 
+                    "주성분": main_ingredient,
+                    "type": "usage"
+                })
                 excel_docs.append(doc_obj)
 
             # 전체 내용도 보존 (검색용)
@@ -262,7 +227,8 @@ if excel_vectordb is None:
     # 캐시 저장 (실패해도 계속 진행)
     try:
         cache_manager.save_vector_cache("excel", excel_files, excel_vectordb)
-        print("✅ Excel 벡터 DB 캐시 저장 완료")
+        cache_manager.save_excel_docs_cache("excel", excel_docs)
+        print("✅ Excel 벡터 DB 및 문서 캐시 저장 완료")
     except Exception as e:
         print(f"⚠️ Excel 캐시 저장 실패, 계속 진행: {e}")
 
@@ -281,22 +247,63 @@ search_agent = initialize_agent(
 )
 
 # === LLM 요약기 ===
+def extract_active_ingredients_from_medicine(medicine_name: str) -> List[str]:
+    """약품명으로부터 주성분 추출"""
+    ingredients = []
+    
+    try:
+        # Excel DB에서 해당 약품의 주성분 찾기
+        for doc in excel_docs:
+            if doc.metadata.get("제품명") == medicine_name:
+                # 주성분 정보가 메타데이터에 있는지 확인
+                if "주성분" in doc.metadata:
+                    ingredient = doc.metadata["주성분"]
+                    if ingredient and ingredient != "정보 없음":
+                        ingredients.append(ingredient)
+                        break
+        
+        # 주성분이 없으면 문서 내용에서 추출 시도
+        if not ingredients:
+            for doc in excel_docs:
+                if doc.metadata.get("제품명") == medicine_name:
+                    content = doc.page_content
+                    # 주성분 관련 패턴 찾기
+                    import re
+                    patterns = [
+                        r'주성분[:\s]*([^,\n]+)',
+                        r'성분[:\s]*([^,\n]+)',
+                        r'주요성분[:\s]*([^,\n]+)'
+                    ]
+                    
+                    for pattern in patterns:
+                        matches = re.findall(pattern, content)
+                        if matches:
+                            ingredients.extend([match.strip() for match in matches])
+                            break
+        
+        print(f"🔍 {medicine_name} 주성분 추출: {ingredients}")
+        return ingredients
+        
+    except Exception as e:
+        print(f"❌ 주성분 추출 오류: {e}")
+        return []
+
 def summarize_structured_json(text: str) -> dict:
     prompt = f"""
-다음 약품 관련 텍스트에서 항목별 정보를 JSON 형식으로 정리해줘.
-항목은 '제품명', '효능', '부작용', '사용법'이며, 없으면 "정보 없음"으로 표기해줘.
+    다음 약품 관련 텍스트에서 항목별 정보를 JSON 형식으로 정리해줘.
+    항목은 '제품명', '효능', '부작용', '사용법'이며, 없으면 "정보 없음"으로 표기해줘.
 
-텍스트:
-{text}
+    텍스트:
+    {text}
 
-결과 형식:
-{{
-  "제품명": "...",
-  "효능": "...",
-  "부작용": "...",
-  "사용법": "..."
-}}
-"""
+    결과 형식:
+    {{
+      "제품명": "...",
+      "효능": "...",
+      "부작용": "...",
+      "사용법": "..."
+    }}
+    """
     try:
         response = llm.invoke(prompt)
         return json.loads(response.content.strip())
@@ -308,6 +315,43 @@ def summarize_structured_json(text: str) -> dict:
             "사용법": "정보 없음"
         }
 
+# === 성분 색인 구축 (동적) ===
+def build_ingredient_index():
+    """Excel DB에서 모든 성분명을 동적으로 추출하고 성분→제품 매핑 생성"""
+    all_ingredients = set()
+    ingredient_to_products = {}
+    
+    print("📊 성분 색인 구축 중...")
+    
+    for doc in excel_docs:
+        product_name = doc.metadata.get("제품명", "")
+        ingredients_str = doc.metadata.get("주성분", "")
+        
+        if ingredients_str and ingredients_str != "정보 없음":
+            # 쉼표로 구분된 성분들 분리
+            ingredients = [ing.strip() for ing in ingredients_str.split(',') if ing.strip()]
+            
+            for ingredient in ingredients:
+                all_ingredients.add(ingredient)
+                
+                # 성분 → 제품 매핑
+                if ingredient not in ingredient_to_products:
+                    ingredient_to_products[ingredient] = []
+                if product_name and product_name not in ingredient_to_products[ingredient]:
+                    ingredient_to_products[ingredient].append(product_name)
+    
+    print(f"✅ 추출된 성분 총 {len(all_ingredients)}개")
+    print(f"✅ 성분→제품 매핑 {len(ingredient_to_products)}개 생성")
+    
+    return all_ingredients, ingredient_to_products
+
+# 전역 변수로 저장 (시작 시 한 번만 실행)
+known_ingredients, ingredient_to_products_map = build_ingredient_index()
+
+def find_products_by_ingredient(ingredient_name: str) -> List[str]:
+    """특정 성분이 포함된 제품 목록 반환"""
+    return ingredient_to_products_map.get(ingredient_name, [])
+
 # === Export 대상 ===
 __all__ = [
     "pdf_retriever",
@@ -316,8 +360,12 @@ __all__ = [
     "product_names_normalized",
     "search_agent",
     "summarize_structured_json",
+    "extract_active_ingredients_from_medicine",
     "pdf_product_index",
     "excel_product_index",
     "pdf_structured_docs",
-    "excel_docs"
+    "excel_docs",
+    "known_ingredients",
+    "ingredient_to_products_map",
+    "find_products_by_ingredient"
 ]

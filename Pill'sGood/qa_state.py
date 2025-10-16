@@ -125,6 +125,20 @@ class QAState(TypedDict, total=False):
     search_decision: Optional[str]
     search_reasoning: Optional[str]
     search_strategy: Optional[str]
+    
+    # 연속 질문 처리 (새로 추가)
+    is_follow_up: Optional[bool]
+    follow_up_type: Optional[str]
+
+    # 향상된 RAG 결과
+    enhanced_rag_answer: Optional[str]
+    enhanced_rag_analysis: Optional[dict]
+    follow_up_questions: Optional[List[str]]
+    excel_info: Optional[dict]
+    pdf_info: Optional[dict]
+    korean_ingredient_info: Optional[dict]
+    international_ingredient_info: Optional[dict]
+    combined_analysis: Optional[dict]
 
     # 최종 생성 결과
     final_answer: Optional[str]
