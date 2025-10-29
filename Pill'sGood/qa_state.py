@@ -74,6 +74,9 @@ class QAState(TypedDict, total=False):
     # OCR 이미지 처리 관련
     image_data: Optional[bytes]  # 업로드된 이미지 데이터
     extracted_text: Optional[str]  # OCR로 추출된 텍스트
+    
+    # 사용자 위치 정보
+    user_location: Optional[dict]  # 사용자 위치 정보 (lat, lng, timestamp)
 
     # 전처리 정보
     condition: Optional[str]

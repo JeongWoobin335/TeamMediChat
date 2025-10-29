@@ -259,7 +259,11 @@ def extract_active_ingredients_from_medicine(medicine_name: str) -> List[str]:
                 if "주성분" in doc.metadata:
                     ingredient = doc.metadata["주성분"]
                     if ingredient and ingredient != "정보 없음":
-                        ingredients.append(ingredient)
+                        # 쉼표로 구분된 성분들을 분리
+                        if ',' in ingredient:
+                            ingredients = [ing.strip() for ing in ingredient.split(',') if ing.strip()]
+                        else:
+                            ingredients = [ingredient.strip()]
                         break
         
         # 주성분이 없으면 문서 내용에서 추출 시도
@@ -278,7 +282,12 @@ def extract_active_ingredients_from_medicine(medicine_name: str) -> List[str]:
                     for pattern in patterns:
                         matches = re.findall(pattern, content)
                         if matches:
-                            ingredients.extend([match.strip() for match in matches])
+                            # 쉼표로 구분된 성분들을 분리
+                            for match in matches:
+                                if ',' in match:
+                                    ingredients.extend([ing.strip() for ing in match.split(',') if ing.strip()])
+                                else:
+                                    ingredients.append(match.strip())
                             break
         
         print(f"🔍 {medicine_name} 주성분 추출: {ingredients}")
@@ -352,6 +361,168 @@ def find_products_by_ingredient(ingredient_name: str) -> List[str]:
     """특정 성분이 포함된 제품 목록 반환"""
     return ingredient_to_products_map.get(ingredient_name, [])
 
+# === 용량주의 성분 데이터 처리 ===
+dosage_warning_ingredients = {}  # 성분명 -> 용량 정보 매핑
+dosage_warning_loaded = False
+
+def load_dosage_warning_data():
+    """용량주의 성분 리스트 로드"""
+    global dosage_warning_ingredients, dosage_warning_loaded
+    
+    print(f"🔍 용량주의 성분 리스트 로드 시도 - 현재 상태: loaded={dosage_warning_loaded}")
+    
+    if dosage_warning_loaded:
+        print(f"📂 이미 로드됨 - 총 {len(dosage_warning_ingredients)}개 성분")
+        return dosage_warning_ingredients
+    
+    try:
+        # 용량주의 성분 리스트 파일 경로 (실제 파일 위치에 맞게 수정 필요)
+        dosage_file_path = r"C:\Users\jung\Desktop\22\용량주의 성분리스트_250530.xlsx"
+        
+        print(f"🔍 파일 존재 확인: {dosage_file_path}")
+        print(f"🔍 파일 존재 여부: {os.path.exists(dosage_file_path)}")
+        
+        if not os.path.exists(dosage_file_path):
+            print(f"⚠️ 용량주의 성분 리스트 파일을 찾을 수 없습니다: {dosage_file_path}")
+            dosage_warning_loaded = True
+            return dosage_warning_ingredients
+        
+        print("📊 용량주의 성분 리스트 로드 중...")
+        df = pd.read_excel(dosage_file_path)
+        print(f"📊 엑셀 파일 로드 완료 - 행 수: {len(df)}, 컬럼: {list(df.columns)}")
+        
+        # 실제 데이터가 시작되는 행 찾기 (헤더 행 건너뛰기)
+        data_start_row = 0
+        for idx, row in df.iterrows():
+            # 첫 번째 컬럼에 숫자가 있는 행을 찾기 (연번)
+            first_col = str(row.iloc[0]).strip()
+            if first_col.isdigit():
+                data_start_row = idx
+                break
+        
+        print(f"🔍 데이터 시작 행: {data_start_row}")
+        
+        # 실제 데이터만 사용 (헤더 행 제외)
+        if data_start_row > 0:
+            df = df.iloc[data_start_row:].reset_index(drop=True)
+            print(f"🔍 헤더 제거 후 행 수: {len(df)}")
+        
+        # 컬럼명을 수동으로 매핑 (Unnamed 컬럼들)
+        # 일반적으로 용량주의 성분 리스트는 다음 순서: 연번, 성분명(국문), 성분명(영문), 제형, 1일 최대용량, 비고
+        actual_columns = {
+            'korean_name': df.columns[1] if len(df.columns) > 1 else None,  # 두 번째 컬럼
+            'english_name': df.columns[2] if len(df.columns) > 2 else None,  # 세 번째 컬럼
+            'formulation': df.columns[3] if len(df.columns) > 3 else None,    # 네 번째 컬럼
+            'max_daily_dose': df.columns[4] if len(df.columns) > 4 else None, # 다섯 번째 컬럼
+            'remarks': df.columns[5] if len(df.columns) > 5 else None         # 여섯 번째 컬럼
+        }
+        
+        print(f"🔍 수동 컬럼 매핑 결과: {actual_columns}")
+        
+        # None 값 제거
+        actual_columns = {k: v for k, v in actual_columns.items() if v is not None}
+        
+        if not actual_columns:
+            print("❌ 용량주의 성분 리스트 컬럼을 찾을 수 없습니다")
+            dosage_warning_loaded = True
+            return dosage_warning_ingredients
+        
+        # 데이터 처리
+        processed_count = 0
+        print(f"🔍 데이터 처리 시작 - 총 {len(df)}행")
+        
+        for idx, row in df.iterrows():
+            korean_name = str(row.get(actual_columns.get('korean_name', ''), '')).strip()
+            english_name = str(row.get(actual_columns.get('english_name', ''), '')).strip()
+            formulation = str(row.get(actual_columns.get('formulation', ''), '')).strip()
+            max_dose = str(row.get(actual_columns.get('max_daily_dose', ''), '')).strip()
+            remarks = str(row.get(actual_columns.get('remarks', ''), '')).strip()
+            
+            if idx < 5:  # 처음 5개 행만 로그 출력
+                print(f"🔍 행 {idx}: 한글='{korean_name}', 영문='{english_name}', 용량='{max_dose}'")
+            
+            if not korean_name or korean_name == 'nan':
+                continue
+            
+            # 한국어 성분명으로 매핑
+            dosage_warning_ingredients[korean_name] = {
+                'korean_name': korean_name,
+                'english_name': english_name,
+                'formulation': formulation,
+                'max_daily_dose': max_dose,
+                'remarks': remarks
+            }
+            
+            # 영어 성분명으로도 매핑 (있는 경우)
+            if english_name and english_name != 'nan':
+                dosage_warning_ingredients[english_name] = {
+                    'korean_name': korean_name,
+                    'english_name': english_name,
+                    'formulation': formulation,
+                    'max_daily_dose': max_dose,
+                    'remarks': remarks
+                }
+            
+            processed_count += 1
+        
+        print(f"✅ 용량주의 성분 {len(dosage_warning_ingredients)}개 로드 완료 (처리된 행: {processed_count}개)")
+        print(f"🔍 로드된 성분 예시: {list(dosage_warning_ingredients.keys())[:5]}")
+        dosage_warning_loaded = True
+        
+    except Exception as e:
+        print(f"❌ 용량주의 성분 리스트 로드 실패: {e}")
+        dosage_warning_loaded = True
+    
+    return dosage_warning_ingredients
+
+def find_dosage_warning_info(ingredient_name: str) -> dict:
+    """특정 성분의 용량주의 정보 찾기"""
+    if not dosage_warning_loaded:
+        load_dosage_warning_data()
+    
+    # 정확한 매칭 시도
+    if ingredient_name in dosage_warning_ingredients:
+        return dosage_warning_ingredients[ingredient_name]
+    
+    # 부분 매칭 시도 (성분명이 포함된 경우)
+    for key, value in dosage_warning_ingredients.items():
+        if ingredient_name in key or key in ingredient_name:
+            return value
+    
+    # 정규화된 매칭 시도
+    normalized_ingredient = re.sub(r'[^\w가-힣]', '', ingredient_name.lower())
+    for key, value in dosage_warning_ingredients.items():
+        normalized_key = re.sub(r'[^\w가-힣]', '', key.lower())
+        if normalized_ingredient in normalized_key or normalized_key in normalized_ingredient:
+            return value
+    
+    return None
+
+def get_medicine_dosage_warnings(medicine_name: str) -> List[dict]:
+    """약품의 주성분들 중 용량주의 성분이 있는지 확인"""
+    print(f"🔍 용량주의 성분 확인 시작: '{medicine_name}'")
+    
+    warnings = []
+    
+    # 약품의 주성분 추출
+    ingredients = extract_active_ingredients_from_medicine(medicine_name)
+    print(f"🔍 추출된 주성분: {ingredients}")
+    
+    for ingredient in ingredients:
+        print(f"🔍 성분 '{ingredient}' 용량주의 확인 중...")
+        dosage_info = find_dosage_warning_info(ingredient)
+        if dosage_info:
+            print(f"✅ 용량주의 성분 발견: '{ingredient}' - {dosage_info['max_daily_dose']}")
+            warnings.append({
+                'ingredient': ingredient,
+                'dosage_info': dosage_info
+            })
+        else:
+            print(f"❌ 용량주의 성분 아님: '{ingredient}'")
+    
+    print(f"🔍 최종 용량주의 성분 개수: {len(warnings)}")
+    return warnings
+
 # === Export 대상 ===
 __all__ = [
     "pdf_retriever",
@@ -367,5 +538,8 @@ __all__ = [
     "excel_docs",
     "known_ingredients",
     "ingredient_to_products_map",
-    "find_products_by_ingredient"
+    "find_products_by_ingredient",
+    "load_dosage_warning_data",
+    "find_dosage_warning_info",
+    "get_medicine_dosage_warnings"
 ]

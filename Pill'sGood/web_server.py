@@ -73,6 +73,12 @@ async def get_chat_page():
     with open("static/chat.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
+@app.get("/map", response_class=HTMLResponse)
+async def get_map_page():
+    """카카오 맵 페이지 HTML 반환"""
+    with open("static/index.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
 @app.get("/api/sessions")
 async def get_sessions():
     """저장된 세션 목록 반환"""
@@ -91,6 +97,26 @@ async def create_session():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """세션 삭제"""
+    try:
+        # 세션 존재 확인
+        if not chat_manager.session_exists(session_id):
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+        
+        # 세션 삭제
+        success = chat_manager.delete_session(session_id)
+        if success:
+            return {"message": "세션이 삭제되었습니다."}
+        else:
+            raise HTTPException(status_code=500, detail="세션 삭제에 실패했습니다.")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/ocr")
 async def process_image_ocr(image: UploadFile = File(...), query: str = ""):
     """이미지 OCR 처리 API"""
@@ -106,7 +132,7 @@ async def process_image_ocr(image: UploadFile = File(...), query: str = ""):
         if not image.content_type.startswith('image/'):
             raise HTTPException(status_code=400, detail="이미지 파일만 업로드할 수 있습니다.")
         
-        print(f"📸 OCR API 호출: {image.filename}, 크기: {len(image_data)} bytes")
+        # OCR API 호출
         
         # OCR 처리
         from ocr_node import extract_text_from_image, extract_medicine_name_from_text
@@ -136,6 +162,103 @@ async def process_image_ocr(image: UploadFile = File(...), query: str = ""):
         print(f"❌ OCR 처리 중 오류 발생: {e}")
         raise HTTPException(status_code=500, detail=f"OCR 처리 중 오류가 발생했습니다: {str(e)}")
 
+@app.post("/api/pharmacy/search")
+async def search_nearby_pharmacies(latitude: float, longitude: float, radius: int = 1000):
+    """근처 약국 검색 API (카카오 주소 검색 API 활용)"""
+    try:
+        import requests
+        
+        # 카카오 주소 검색 API를 사용한 약국 검색
+        kakao_api_key = "c6cd8abf935c72e801367bc8249c4f1f"  # 실제 API 키 사용
+        url = "https://dapi.kakao.com/v2/local/search/category.json"
+        
+        headers = {
+            "Authorization": f"KakaoAK {kakao_api_key}"
+        }
+        
+        params = {
+            "category_group_code": "PM9",  # 약국 카테고리 코드
+            "x": longitude,
+            "y": latitude,
+            "radius": radius,
+            "sort": "distance"  # 거리순 정렬
+        }
+        
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            pharmacies = []
+            
+            for place in data.get("documents", [])[:5]:  # 상위 5개만 반환
+                # 거리 계산 (간단한 하버사인 공식) - 타입 변환 추가
+                distance = calculate_distance(
+                    float(latitude), float(longitude),
+                    float(place["y"]), float(place["x"])
+                )
+                
+                pharmacy_info = {
+                    "name": place["place_name"],
+                    "address": place["address_name"],
+                    "road_address": place.get("road_address_name", ""),
+                    "phone": place.get("phone", ""),
+                    "distance": round(distance * 1000, 1),  # km를 m로 변환
+                    "latitude": float(place["y"]),
+                    "longitude": float(place["x"]),
+                    "place_url": place.get("place_url", "")
+                }
+                pharmacies.append(pharmacy_info)
+            
+            return {
+                "success": True,
+                "pharmacies": pharmacies,
+                "total_count": len(pharmacies)
+            }
+        else:
+            print(f"❌ 카카오 API 오류: {response.status_code}")
+            return {
+                "success": False,
+                "message": "약국 검색 중 오류가 발생했습니다.",
+                "pharmacies": []
+            }
+            
+    except Exception as e:
+        print(f"❌ 약국 검색 중 오류 발생: {e}")
+        return {
+            "success": False,
+            "message": "약국 검색 중 오류가 발생했습니다.",
+            "pharmacies": []
+        }
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """두 지점 간의 거리 계산 (km) - 타입 검증 추가"""
+    import math
+    
+    # 타입 검증 및 변환
+    try:
+        lat1 = float(lat1)
+        lon1 = float(lon1)
+        lat2 = float(lat2)
+        lon2 = float(lon2)
+    except (ValueError, TypeError) as e:
+        print(f"❌ 좌표 타입 변환 오류: {e}")
+        return 0.0
+    
+    # 하버사인 공식
+    R = 6371  # 지구 반지름 (km)
+    
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    
+    a = (math.sin(dlat/2) * math.sin(dlat/2) + 
+         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
+         math.sin(dlon/2) * math.sin(dlon/2))
+    
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    distance = R * c
+    
+    return distance
+
 @app.get("/api/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str, limit: int = 50):
     """특정 세션의 메시지 히스토리 반환"""
@@ -144,46 +267,19 @@ async def get_session_messages(session_id: str, limit: int = 50):
         if not chat_manager.session_exists(session_id):
             raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
         
-        # 대화 맥락 가져오기
-        context = chat_manager.get_conversation_context(max_messages=limit)
+        # 특정 세션의 메시지 가져오기
+        session = chat_manager.sessions.get(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
         
         # 메시지 형식으로 변환
         messages = []
-        if context:
-            lines = context.strip().split('\n')
-            current_role = None
-            current_content = []
-            
-            for line in lines:
-                if line.startswith('사용자: '):
-                    if current_role and current_content:
-                        messages.append({
-                            "role": current_role,
-                            "content": '\n'.join(current_content).strip(),
-                            "timestamp": datetime.now().isoformat()
-                        })
-                    current_role = "user"
-                    current_content = [line[4:]]  # "사용자: " 제거
-                elif line.startswith('AI: '):
-                    if current_role and current_content:
-                        messages.append({
-                            "role": current_role,
-                            "content": '\n'.join(current_content).strip(),
-                            "timestamp": datetime.now().isoformat()
-                        })
-                    current_role = "assistant"
-                    current_content = [line[4:]]  # "AI: " 제거
-                else:
-                    if current_content:
-                        current_content.append(line)
-            
-            # 마지막 메시지 추가
-            if current_role and current_content:
-                messages.append({
-                    "role": current_role,
-                    "content": '\n'.join(current_content).strip(),
-                    "timestamp": datetime.now().isoformat()
-                })
+        for msg in session.messages[-limit:]:  # 최근 N개 메시지만
+            messages.append({
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": msg.timestamp.isoformat()
+            })
         
         return {"messages": messages, "session_id": session_id}
         
@@ -249,6 +345,13 @@ async def handle_chat_message(websocket: WebSocket, session_id: str, message_dat
     try:
         user_message = message_data["content"]
         image_data = message_data.get("image_data")  # 이미지 데이터 추출
+        user_location = message_data.get("user_location")  # 사용자 위치 정보 추출
+        
+        # 디버깅: 사용자 위치 정보 로그
+        if user_location:
+            print(f"📍 사용자 위치 정보 수신됨: {user_location}")
+        else:
+            print("⚠️ 사용자 위치 정보 없음")
         
         # 사용자 메시지 브로드캐스트
         await manager.broadcast_to_session({
@@ -321,16 +424,10 @@ async def handle_chat_message(websocket: WebSocket, session_id: str, message_dat
                     found_medicines = analysis_result.get("found_medicines", [])
                     reasoning = analysis_result.get("reasoning", "")
                     
-                    print(f"🧠 LLM 맥락 분석 결과:")
-                    print(f"  - 약품 추천 포함: {has_medicine_recommendation}")
-                    print(f"  - 이전 대화 참조: {is_asking_about_previous}")
-                    print(f"  - 발견된 약품: {found_medicines[:3] if found_medicines else '없음'}")
-                    print(f"  - 분석 근거: {reasoning[:100] if reasoning else '없음'}...")
+                    # LLM 맥락 분석 결과 처리
                     
                 except json.JSONDecodeError as e:
-                    print(f"⚠️ 맥락 분석 결과를 JSON으로 파싱할 수 없음: {e}")
-                    print(f"🔍 원본 응답 (처음 200자): {response[:200]}...")
-                    print(f"🔍 정리된 응답 (처음 200자): {cleaned_response[:200]}...")
+                    # JSON 파싱 실패 시 기본값 사용
                     has_medicine_recommendation = False
                     is_asking_about_previous = False
                     found_medicines = []
@@ -346,7 +443,7 @@ async def handle_chat_message(websocket: WebSocket, session_id: str, message_dat
             if image_data:
                 try:
                     image_bytes = bytes(image_data)
-                    print(f"📸 이미지 데이터 수신: {len(image_bytes)} bytes")
+        # 이미지 데이터 수신
                 except Exception as e:
                     print(f"❌ 이미지 데이터 변환 오류: {e}")
             
@@ -358,7 +455,8 @@ async def handle_chat_message(websocket: WebSocket, session_id: str, message_dat
                 user_context=chat_manager.get_user_context(),
                 has_medicine_recommendation=has_medicine_recommendation,
                 is_asking_about_previous=is_asking_about_previous,
-                image_data=image_bytes  # 이미지 데이터 추가
+                image_data=image_bytes,  # 이미지 데이터 추가
+                user_location=user_location  # 사용자 위치 정보 추가
             )
             
             # 그래프 실행
@@ -366,6 +464,24 @@ async def handle_chat_message(websocket: WebSocket, session_id: str, message_dat
             
             # 답변 추출
             ai_answer = result.get("final_answer", "죄송합니다. 답변을 생성할 수 없습니다.")
+            
+            # 근처 약국 정보 추가 (사용자 위치가 있고 의약품 관련 질문인 경우)
+            if user_location and is_medicine_related_question(user_message):
+                try:
+                    # 근처 약국 검색
+                    pharmacy_response = await search_nearby_pharmacies(
+                        latitude=user_location["lat"],
+                        longitude=user_location["lng"],
+                        radius=1000
+                    )
+                    
+                    if pharmacy_response["success"] and pharmacy_response["pharmacies"]:
+                        # 약국 정보를 답변에 추가
+                        ai_answer = add_pharmacy_info_to_answer(ai_answer, pharmacy_response["pharmacies"])
+                        print(f"✅ 근처 약국 정보 추가됨: {len(pharmacy_response['pharmacies'])}개")
+                    
+                except Exception as e:
+                    print(f"❌ 약국 정보 추가 중 오류: {e}")
             
             # 세션에 메시지 추가
             chat_manager.add_user_message(user_message)
@@ -399,6 +515,35 @@ async def handle_chat_message(websocket: WebSocket, session_id: str, message_dat
             "session_id": session_id
         }, session_id)
 
+def is_medicine_related_question(message: str) -> bool:
+    """의약품 관련 질문인지 판단"""
+    medicine_keywords = [
+        "약", "약품", "약국", "처방", "복용", "부작용", "효능", "성분",
+        "두통", "감기", "해열", "소화", "통증", "염증", "알레르기",
+        "타이레놀", "아스피린", "이부프로펜", "감기약", "두통약"
+    ]
+    
+    message_lower = message.lower()
+    return any(keyword in message_lower for keyword in medicine_keywords)
+
+def add_pharmacy_info_to_answer(answer: str, pharmacies: list) -> str:
+    """답변에 약국 정보 추가"""
+    if not pharmacies:
+        return answer
+    
+    pharmacy_info = "\n\n🏥 **근처 약국 정보:**\n"
+    
+    for i, pharmacy in enumerate(pharmacies[:3], 1):  # 상위 3개만 표시
+        pharmacy_info += f"{i}. **{pharmacy['name']}**\n"
+        pharmacy_info += f"   📍 {pharmacy['road_address'] or pharmacy['address']}\n"
+        if pharmacy['phone']:
+            pharmacy_info += f"   📞 {pharmacy['phone']}\n"
+        pharmacy_info += f"   📏 거리: {pharmacy['distance']}m\n\n"
+    
+    pharmacy_info += "💡 **참고:** 위 약국들은 현재 위치 기준으로 가장 가까운 곳들입니다. 정확한 약품 구매 가능 여부는 약국에 직접 문의하시기 바랍니다."
+    
+    return answer + pharmacy_info
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=5050)

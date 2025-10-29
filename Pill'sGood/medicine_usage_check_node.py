@@ -1,7 +1,7 @@
 # medicine_usage_check_node.py
 
 from qa_state import QAState
-from retrievers import llm, pdf_structured_docs, excel_docs
+from retrievers import llm, pdf_structured_docs, excel_docs, get_medicine_dosage_warnings, load_dosage_warning_data
 from langchain_core.documents import Document
 from typing import List, Optional
 import json
@@ -206,22 +206,26 @@ def extract_field_from_doc(text: str, label: str) -> str:
 def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict:
     """약품 사용 안전성 판단"""
     
-    # 캐시에서 먼저 확인
+    # 캐시에서 먼저 확인 (용량주의 성분 리스트 통합으로 인해 캐시 비활성화)
     cache_key = f"{medicine_info['제품명']}_{usage_context}"
     cache_file = cache_manager.matching_cache_dir / f"{cache_key}.pkl"
     
-    if cache_file.exists():
-        try:
-            import pickle
-            with open(cache_file, 'rb') as f:
-                cached_result = pickle.load(f)
-            print(f"📂 사용 가능성 캐시 히트: {cache_key}")
-            return cached_result
-        except Exception as e:
-            print(f"❌ 사용 가능성 캐시 로드 실패: {e}")
-    
-    # 캐시에 없으면 None 반환
+    # 용량주의 성분 리스트가 통합되었으므로 캐시를 무시하고 새로 계산
+    print(f"🔍 용량주의 성분 리스트 통합으로 인해 캐시 무시: {cache_key}")
     cached_result = None
+    
+    # 용량주의 성분 정보 확인
+    dosage_warnings = get_medicine_dosage_warnings(medicine_info['제품명'])
+    dosage_warning_text = ""
+    if dosage_warnings:
+        dosage_warning_text = "\n\n## ⚠️ 용량주의 성분 정보\n"
+        for warning in dosage_warnings:
+            ingredient = warning['ingredient']
+            dosage_info = warning['dosage_info']
+            dosage_warning_text += f"- **{ingredient}**: 1일 최대용량 {dosage_info['max_daily_dose']}\n"
+            if dosage_info['remarks'] and dosage_info['remarks'] != 'nan':
+                dosage_warning_text += f"  - 비고: {dosage_info['remarks']}\n"
+        dosage_warning_text += "\n**중요**: 용량주의 성분이 포함된 약품은 반드시 의사나 약사의 처방에 따라 사용하세요.\n"
     
     # LLM을 사용한 안전성 판단 - 최적화된 프롬프트
     prompt = f"""당신은 의약품 안전성 평가 전문가입니다. 단계별로 분석하여 근거 있는 판단을 내리세요.
@@ -230,7 +234,7 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
 - 제품명: {medicine_info['제품명']}
 - 효능: {medicine_info['효능']}
 - 부작용: {medicine_info['부작용']}
-- 사용법: {medicine_info['사용법']}
+- 사용법: {medicine_info['사용법']}{dosage_warning_text}
 
 ## 🎯 사용 상황
 {usage_context}
@@ -258,7 +262,23 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
 - 매칭 강도: ___%
 - 근거: [효능의 어떤 부분이 사용 상황과 연관되는지 구체적으로 설명]
 
-### STEP 2: 위험도 평가
+### STEP 2: 용량주의 성분 평가 (새로 추가)
+**용량주의 성분 점검:**
+- 용량주의 성분이 포함되어 있는가?
+- 1일 최대용량 정보가 제공되었는가?
+- 복합제인 경우 각 성분별 용량 고려 필요
+
+**용량주의 성분이 있는 경우:**
+- 반드시 의사나 약사 처방 필요
+- 자가 처방 금지
+- 용량 초과 시 심각한 부작용 가능성
+
+**STEP 2 결과:**
+- 용량주의 여부: 있음 / 없음
+- 처방 필요성: 필수 / 권장 / 불필요
+- 근거: [구체적 설명]
+
+### STEP 3: 위험도 평가
 **부작용 심각도 점검:**
 - 심각한 부작용 있음? (쇼크, 중증 알레르기 등) → 위험
 - 일반적 부작용만 있음? (졸음, 가벼운 소화불량 등) → 보통
@@ -268,19 +288,20 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
 - 해당 상황에서 부작용이 치명적인가?
 - 사용법이 상황에 맞는가? (경구/외용 등)
 
-**STEP 2 결과:**
+**STEP 3 결과:**
 - 위험 수준: 높음 / 보통 / 낮음
 - 근거: [구체적 설명]
 
-### STEP 3: 최종 판단
+### STEP 4: 최종 판단
 **종합 점수 계산:**
-- 매칭 강도 ≥ 50% + 위험 수준 낮음/보통 → 사용 가능
+- 용량주의 성분 있음 → 반드시 의사/약사 처방 필요
+- 매칭 강도 ≥ 50% + 위험 수준 낮음/보통 + 용량주의 없음 → 사용 가능
 - 매칭 강도 < 50% 또는 위험 수준 높음 → 사용 불가
 
 **신뢰도 평가:**
-- 높음: 명확한 효능 일치 + 안전성 확인됨
-- 중간: 유사 증상 + 큰 위험 없음
-- 낮음: 효능 불명확하거나 위험 요소 있음
+- 높음: 명확한 효능 일치 + 안전성 확인됨 + 용량주의 정보 확인됨
+- 중간: 유사 증상 + 큰 위험 없음 + 용량주의 없음
+- 낮음: 효능 불명확하거나 위험 요소 있음 또는 용량주의 성분 포함
 
 ## 💡 판단 예시
 
@@ -304,8 +325,11 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
     "safe_to_use": true/false,
     "confidence_score": 0.0~1.0,
     "matching_strength": 0~100,
-    "reason": "STEP 1-3 분석 결과를 바탕으로 한 구체적 근거 (2-3문장)",
+    "has_dosage_warning": true/false,
+    "prescription_required": true/false,
+    "reason": "STEP 1-4 분석 결과를 바탕으로 한 구체적 근거 (2-3문장)",
     "precautions": "주의사항 (필요시)",
+    "dosage_warnings": ["용량주의 성분 정보 (있는 경우)"],
     "alternative_suggestion": "대안 제안 (사용 불가 시)"
 }}
 
@@ -337,8 +361,14 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
                 result["confidence_score"] = 0.7  # 기본 중간 신뢰도
             if "matching_strength" not in result:
                 result["matching_strength"] = 50  # 기본 중간 매칭
+            if "has_dosage_warning" not in result:
+                result["has_dosage_warning"] = len(dosage_warnings) > 0
+            if "prescription_required" not in result:
+                result["prescription_required"] = len(dosage_warnings) > 0
+            if "dosage_warnings" not in result:
+                result["dosage_warnings"] = [f"{w['ingredient']}: {w['dosage_info']['max_daily_dose']}" for w in dosage_warnings]
             
-            print(f"✅ JSON 파싱 성공: safe_to_use={result.get('safe_to_use')}, confidence={result.get('confidence_score')}, matching={result.get('matching_strength')}%")
+            print(f"✅ JSON 파싱 성공: safe_to_use={result.get('safe_to_use')}, confidence={result.get('confidence_score')}, matching={result.get('matching_strength')}%, dosage_warning={result.get('has_dosage_warning')}")
         except json.JSONDecodeError as e:
             print(f"❌ JSON 파싱 실패: {e}")
             print(f"🔍 원본 응답: {response}")
@@ -347,8 +377,11 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
                 "safe_to_use": False,
                 "confidence_score": 0.3,
                 "matching_strength": 0,
+                "has_dosage_warning": len(dosage_warnings) > 0,
+                "prescription_required": len(dosage_warnings) > 0,
                 "reason": "약품 정보를 분석할 수 없습니다.",
                 "precautions": "의사나 약사와 상담하세요.",
+                "dosage_warnings": [f"{w['ingredient']}: {w['dosage_info']['max_daily_dose']}" for w in dosage_warnings],
                 "alternative_suggestion": ""
             }
         
@@ -369,8 +402,11 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
             "safe_to_use": False,
             "confidence_score": 0.0,
             "matching_strength": 0,
+            "has_dosage_warning": len(dosage_warnings) > 0,
+            "prescription_required": len(dosage_warnings) > 0,
             "reason": "안전성 판단 중 오류가 발생했습니다.",
             "precautions": "의사나 약사와 상담하세요.",
+            "dosage_warnings": [f"{w['ingredient']}: {w['dosage_info']['max_daily_dose']}" for w in dosage_warnings],
             "alternative_suggestion": ""
         }
 
@@ -417,10 +453,22 @@ def generate_usage_check_response(medicine_name: str, usage_context: str, medici
     else:
         confidence_text = "낮음 🔴"
     
+    # 용량주의 정보 확인
+    has_dosage_warning = safety_result.get("has_dosage_warning", False)
+    prescription_required = safety_result.get("prescription_required", False)
+    dosage_warnings = safety_result.get("dosage_warnings", [])
+    
     if safety_result["safe_to_use"]:
         response = f"✅ **{medicine_name}**을(를) {clean_context} 사용하는 것은 **가능**합니다.\n\n"
         response += f"**판단 근거:** {safety_result['reason']}\n\n"
         response += f"**신뢰도:** {confidence_text} (효능 매칭: {matching}%)\n\n"
+        
+        # 용량주의 정보 추가
+        if has_dosage_warning:
+            response += f"**⚠️ 용량주의 성분 포함:**\n"
+            for warning in dosage_warnings:
+                response += f"- {warning}\n"
+            response += f"\n**중요:** 용량주의 성분이 포함된 약품은 반드시 의사나 약사의 처방에 따라 사용하세요.\n\n"
         
         if safety_result.get("precautions"):
             response += f"**⚠️ 주의사항:** {safety_result['precautions']}\n\n"
@@ -428,6 +476,13 @@ def generate_usage_check_response(medicine_name: str, usage_context: str, medici
         response = f"❌ **{medicine_name}**을(를) {clean_context} 사용하는 것은 **권장하지 않습니다**.\n\n"
         response += f"**판단 근거:** {safety_result['reason']}\n\n"
         response += f"**신뢰도:** {confidence_text} (효능 매칭: {matching}%)\n\n"
+        
+        # 용량주의 정보 추가
+        if has_dosage_warning:
+            response += f"**⚠️ 용량주의 성분 포함:**\n"
+            for warning in dosage_warnings:
+                response += f"- {warning}\n"
+            response += f"\n**중요:** 용량주의 성분이 포함된 약품은 반드시 의사나 약사의 처방에 따라 사용하세요.\n\n"
         
         if safety_result.get("precautions"):
             response += f"**⚠️ 주의사항:** {safety_result['precautions']}\n\n"

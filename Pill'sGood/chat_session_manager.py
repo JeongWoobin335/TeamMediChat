@@ -141,7 +141,7 @@ class ChatSessionManager:
         return False
     
     def list_sessions(self) -> List[Dict]:
-        """모든 세션 목록 반환"""
+        """모든 세션 목록 반환 (최신순 정렬)"""
         session_list = []
         for session_id, session in self.sessions.items():
             session_list.append({
@@ -151,6 +151,9 @@ class ChatSessionManager:
                 "last_updated": session.last_updated,
                 "is_current": session_id == self.current_session_id
             })
+        
+        # 최신 업데이트 순으로 정렬
+        session_list.sort(key=lambda x: x["last_updated"], reverse=True)
         return session_list
     
     def save_session(self, session_id: str):
@@ -181,6 +184,10 @@ class ChatSessionManager:
                     self.sessions[session.session_id] = session
                 except Exception as e:
                     print(f"세션 로드 실패: {filename}, 오류: {e}")
+    
+    def session_exists(self, session_id: str) -> bool:
+        """세션 존재 여부 확인"""
+        return session_id in self.sessions
     
     def delete_session(self, session_id: str) -> bool:
         """세션 삭제"""

@@ -7,6 +7,7 @@ from qa_state import QAState
 from retrievers import (
     excel_docs, pdf_structured_docs, 
     extract_active_ingredients_from_medicine,
+    get_medicine_dosage_warnings,
     llm
 )
 from pubchem_api import PubChemAPI
@@ -30,7 +31,7 @@ class EnhancedRAGSystem:
     
     def analyze_medicine_comprehensively(self, medicine_name: str, usage_context: str) -> Dict:
         """약품 종합 분석 - 진정한 RAG 구현 (YouTube 통합)"""
-        print(f"🔍 종합 약품 분석 시작: {medicine_name} → {usage_context}")
+        # 종합 약품 분석 시작
         
         analysis_result = {
             'medicine_name': medicine_name,
@@ -39,6 +40,7 @@ class EnhancedRAGSystem:
             'pdf_info': {},
             'korean_ingredient_info': {},
             'international_ingredient_info': {},
+            'dosage_warning_info': {},  # ✅ 용량주의 성분 정보 추가
             'youtube_info': {},  # ✅ YouTube 정보 추가
             'naver_news_info': {},  # ✅ 네이버 뉴스 정보 추가
             'combined_analysis': {},
@@ -49,32 +51,42 @@ class EnhancedRAGSystem:
         
         try:
             # 1단계: Excel DB에서 기본 약품 정보 수집
-            print("📊 1단계: Excel DB에서 기본 정보 수집...")
+            # 1단계: Excel DB에서 기본 정보 수집
             excel_info = self._get_excel_medicine_info(medicine_name)
             analysis_result['excel_info'] = excel_info
             
             # 2단계: PDF DB 검색 제거 (Excel DB만 사용)
-            print("📄 2단계: PDF DB 검색 건너뜀 (Excel DB만 사용)")
+            # 2단계: PDF DB 검색 제거 (Excel DB만 사용)
             analysis_result['pdf_info'] = {}
             
             # 3단계: 주성분 추출
-            print("🧪 3단계: 주성분 추출...")
+            # 3단계: 주성분 추출
             active_ingredients = self._extract_active_ingredients(medicine_name, excel_info)
-            print(f"  추출된 주성분: {active_ingredients}")
+            # 추출된 주성분
+            
+            # 3.5단계: 용량주의 성분 정보 수집
+            # 3.5단계: 용량주의 성분 정보 수집
+            dosage_warnings = get_medicine_dosage_warnings(medicine_name)
+            analysis_result['dosage_warning_info'] = {
+                'warnings': dosage_warnings,
+                'has_warnings': len(dosage_warnings) > 0,
+                'warning_count': len(dosage_warnings)
+            }
+            # 용량주의 성분 발견
             
             # 4단계: 각 주성분에 대한 상세 분석
             korean_ingredient_info = {}
             international_ingredient_info = {}
             
             for ingredient in active_ingredients:
-                print(f"🔍 주성분 분석: {ingredient}")
+                # 주성분 분석
                 
                 # PubChem에서 국제 정보 수집 (한국어명 자동 변환)
-                print(f"  🌍 PubChem에서 {ingredient} 정보 수집...")
+                # PubChem에서 정보 수집
                 international_info = self.pubchem_api.analyze_ingredient_comprehensive(ingredient)
                 
                 # 번역 RAG로 영어 정보를 한국어로 번역
-                print(f"  🔄 {ingredient} 정보 번역 중...")
+                # 정보 번역 중
                 translated_info = self.translation_rag.translate_pharmacology_info(international_info)
                 international_ingredient_info[ingredient] = {
                     'original': international_info,
@@ -85,35 +97,35 @@ class EnhancedRAGSystem:
             analysis_result['international_ingredient_info'] = international_ingredient_info
             
             # 4.5단계: YouTube에서 실전 정보 수집
-            print("📺 4.5단계: YouTube에서 실전 정보 수집...")
+            # 4.5단계: YouTube에서 실전 정보 수집
             youtube_info = self._search_youtube_info(medicine_name, usage_context, active_ingredients)
             analysis_result['youtube_info'] = youtube_info
             
             # 4.6단계: 네이버 뉴스에서 추가 정보 수집 (✅ 신제품, 트렌드 등)
-            print("📰 4.6단계: 네이버 뉴스에서 추가 정보 수집...")
+            # 4.6단계: 네이버 뉴스에서 추가 정보 수집
             naver_news_info = self._search_naver_news_info(medicine_name, active_ingredients)
             analysis_result['naver_news_info'] = naver_news_info
             
             # 5단계: LLM이 모든 정보를 조합하여 근거 있는 분석 수행
-            print("🧠 5단계: LLM 종합 분석 (YouTube, 네이버 뉴스 정보 포함)...")
+            # 5단계: LLM 종합 분석
             combined_analysis = self._perform_llm_analysis(
                 medicine_name, usage_context, analysis_result
             )
             analysis_result['combined_analysis'] = combined_analysis
             
             # 6단계: 근거 기반 답변 생성
-            print("📝 6단계: 근거 기반 답변 생성...")
+            # 6단계: 근거 기반 답변 생성
             evidence_based_response = self._generate_evidence_based_response(
                 medicine_name, usage_context, analysis_result
             )
             analysis_result['evidence_based_response'] = evidence_based_response
             
             # 7단계: 추가 질문 생성
-            print("❓ 7단계: 추가 질문 생성...")
+            # 7단계: 추가 질문 생성
             follow_up_questions = self._generate_follow_up_questions(analysis_result)
             analysis_result['follow_up_questions'] = follow_up_questions
             
-            print(f"✅ 종합 분석 완료: {medicine_name}")
+            # 종합 분석 완료
             
         except Exception as e:
             print(f"❌ 종합 분석 오류: {e}")
@@ -134,12 +146,12 @@ class EnhancedRAGSystem:
                 }
         
         # 정확한 매칭이 없으면 부분 매칭 시도 (수출명 문제 해결)
-        print(f"🔍 Enhanced RAG 정확한 매칭 실패, 부분 매칭 시도: {medicine_name}")
+        # Enhanced RAG 정확한 매칭 실패, 부분 매칭 시도
         for doc in excel_docs:
             product_name = doc.metadata.get("제품명", "")
             # 약품명이 제품명의 시작 부분과 일치하는지 확인
             if product_name.startswith(medicine_name) or medicine_name in product_name:
-                print(f"  Enhanced RAG 부분 매칭 발견: '{product_name}' (검색어: '{medicine_name}')")
+                # Enhanced RAG 부분 매칭 발견
                 return {
                     'product_name': doc.metadata.get("제품명", ""),
                     'main_ingredient': doc.metadata.get("주성분", ""),
@@ -147,7 +159,7 @@ class EnhancedRAGSystem:
                     'metadata': doc.metadata
                 }
         
-        print(f"❌ Enhanced RAG에서 '{medicine_name}' 약품 정보를 찾을 수 없음")
+        # Enhanced RAG에서 약품 정보를 찾을 수 없음
         return {}
     
     def _get_pdf_medicine_info(self, medicine_name: str) -> Dict:
@@ -168,17 +180,17 @@ class EnhancedRAGSystem:
         # Excel 정보에서 주성분 추출
         if excel_info.get('main_ingredient') and excel_info['main_ingredient'] != '정보 없음':
             main_ingredient = excel_info['main_ingredient']
-            print(f"🔍 {medicine_name} 주성분 추출: {main_ingredient}")
+            # 주성분 추출
             
             # 쉼표로 구분된 성분들을 개별적으로 분리
             if ',' in main_ingredient:
                 ingredients = [ing.strip() for ing in main_ingredient.split(',') if ing.strip()]
-                print(f"  분리된 성분들: {ingredients}")
+                # 분리된 성분들
             else:
                 ingredients = [main_ingredient.strip()]
-                print(f"  단일 성분: {ingredients}")
+                # 단일 성분
         else:
-            print(f"  주성분 정보 없음")
+            pass  # 주성분 정보 없음
         
         # 기존 함수 사용 (백업)
         if not ingredients:
@@ -197,6 +209,7 @@ class EnhancedRAGSystem:
             'pdf_info': analysis_result['pdf_info'],
             'korean_ingredient_info': analysis_result['korean_ingredient_info'],
             'international_ingredient_info': analysis_result['international_ingredient_info'],
+            'dosage_warning_info': analysis_result.get('dosage_warning_info', {}),  # ✅ 용량주의 성분 정보 추가
             'youtube_info': analysis_result.get('youtube_info', {}),
             'naver_news_info': analysis_result.get('naver_news_info', {})  # ✅ 네이버 뉴스 정보 추가
         }
@@ -212,6 +225,9 @@ class EnhancedRAGSystem:
         
         # ✅ 네이버 뉴스 정보 요약
         naver_news_summary = self._format_naver_news_info(analysis_result.get('naver_news_info', {}))
+        
+        # ✅ 용량주의 성분 정보 요약
+        dosage_warning_summary = self._format_dosage_warning_info(analysis_result.get('dosage_warning_info', {}))
         
         analysis_prompt = f"""당신은 다중 소스 의약품 정보 통합 전문가입니다. 여러 소스의 정보를 종합하여 근거 있는 분석을 제공하세요.
 
@@ -232,6 +248,9 @@ class EnhancedRAGSystem:
 
 ### 소스 4: 최신 뉴스 & 추가 정보 (신뢰도: 중간, 참고용)
 {naver_news_summary}
+
+### 소스 5: 용량주의 성분 정보 (신뢰도: 높음, 식약처 공고 기준)
+{dosage_warning_summary}
 
 ## 🔍 4단계 통합 분석 프로세스
 
@@ -271,8 +290,13 @@ class EnhancedRAGSystem:
 
 ### STEP 4: 근거 기반 최종 결론
 **종합 판단 기준:**
-- 사용 가능: 연관성 ≥ 50% + 안전성 경미~보통
-- 사용 불가: 연관성 < 50% 또는 안전성 심각
+- 사용 가능: 연관성 ≥ 50% + 안전성 경미~보통 + 용량주의 성분 없음
+- 사용 불가: 연관성 < 50% 또는 안전성 심각 또는 용량주의 성분 있음
+
+**⚠️ 용량주의 성분 특별 고려사항:**
+- 용량주의 성분이 포함된 약품은 반드시 의사/약사 처방 필요
+- 용량주의 성분이 있으면 사용 가능성과 관계없이 처방 의무 강조
+- 1일 최대용량 정보를 반드시 답변에 포함
 
 **신뢰도 레벨:**
 - high: 모든 소스 일치 + 명확한 과학적 근거
@@ -310,14 +334,21 @@ STEP 4: 사용 불가 (신뢰도: high)
     "safety_assessment": "안전성 종합 평가 (1-2문장)",
     "contraindications": ["금기사항1", "금기사항2"],
     "precautions": ["주의사항1", "주의사항2"],
+    "dosage_warning_info": {{
+        "has_dosage_warning": true/false,
+        "warning_ingredients": ["성분1", "성분2"],
+        "max_daily_doses": ["성분1: 용량", "성분2: 용량"],
+        "prescription_required": true/false
+    }},
     "evidence_summary": "판단 근거 요약 (어느 소스에서 어떤 정보 활용했는지 명시)",
     "alternative_suggestions": ["대안1", "대안2"],
-    "expert_recommendation": "최종 전문가 권고사항"
+    "expert_recommendation": "최종 전문가 권고사항 (용량주의 성분이 있으면 반드시 처방 필요성 강조)"
 }}
 
 **중요 지침:**
 - 반드시 STEP 1-4 순서로 사고하세요
 - mechanism_analysis는 구체적 메커니즘 필수 (예: "COX-2 억제", "세로토닌 재흡수 차단")
+- ⚠️ 용량주의 성분이 있으면 반드시 답변에 포함하고 처방 필요성 강조
 - 추측 금지 - 주어진 정보만 사용
 - 모순 발견 시 신뢰도 높은 소스 우선
 - 불확실하면 confidence_level 낮추고 이유 명시
@@ -394,14 +425,18 @@ STEP 4: 사용 불가 (신뢰도: high)
         excel_info = analysis_result.get('excel_info', {})
         korean_info = analysis_result.get('korean_ingredient_info', {})
         international_info = analysis_result.get('international_ingredient_info', {})
+        dosage_warning_info = analysis_result.get('dosage_warning_info', {})  # ✅ 용량주의 성분 정보 추가
         youtube_info = analysis_result.get('youtube_info', {})
         naver_news_info = analysis_result.get('naver_news_info', {})  # ✅ 네이버 뉴스 정보 추가
         combined_analysis = analysis_result.get('combined_analysis', {})
         
         # 동적 대안 약품 검색
-        print("🔍 동적 대안 약품 검색 중...")
+        # 동적 대안 약품 검색 중
         alternative_medicines = self._find_similar_medicines_dynamically(medicine_name, usage_context, excel_info)
-        print(f"✅ 발견된 대안 약품: {[alt['name'] for alt in alternative_medicines]}")
+        # 발견된 대안 약품
+        
+        # 디버깅: 용량주의 정보 확인
+        dosage_warning_formatted = self._format_dosage_warning_info(dosage_warning_info)
         
         # LLM에게 자연스러운 답변 생성 요청
         prompt = f"""
@@ -426,7 +461,10 @@ STEP 4: 사용 불가 (신뢰도: high)
 5. **최신 뉴스 & 추가 정보 (신제품, 트렌드 등):**
 {self._format_naver_news_info(naver_news_info)}
 
-6. **종합 분석 결과:**
+6. **⚠️ 용량주의 성분 정보 (식약처 공고 기준):**
+{dosage_warning_formatted}
+
+7. **종합 분석 결과:**
 - 사용 가능성: {combined_analysis.get('safe_to_use', 'Unknown')}
 - 신뢰도: {combined_analysis.get('confidence_level', 'Unknown')}
 - 작용기전: {combined_analysis.get('mechanism_analysis', '정보 없음')}
@@ -435,6 +473,7 @@ STEP 4: 사용 불가 (신뢰도: high)
 - 금기사항: {combined_analysis.get('contraindications', [])}
 - 대안 제안: {combined_analysis.get('alternative_suggestions', [])}
 - 전문가 권고: {combined_analysis.get('expert_recommendation', '정보 없음')}
+- ⚠️ 용량주의 성분 정보: {combined_analysis.get('dosage_warning_info', {})}
 
 6. **동적 대안 약품 분석:**
 {self._format_alternative_medicines(alternative_medicines)}
@@ -445,21 +484,24 @@ STEP 4: 사용 불가 (신뢰도: high)
 3. **반드시 구체적인 작용기전을 포함하여 상세한 근거 제시**
 4. **실전 사용 팁, 전문가 의견, 주의사항 등을 자연스럽게 녹여서 설명** (있는 경우)
 5. **최신 뉴스 정보가 있다면 자연스럽게 추가 정보로 제공** (신제품, 트렌드 등)
-6. 주의사항과 금기사항을 자연스럽게 언급
-7. 필요시 대안도 제안
-8. 마지막에 의료진 상담 권고
+6. **⚠️ 용량주의 성분이 있으면 반드시 주의사항에 포함하고 처방 필요성 강조**
+7. **⚠️ 용량주의 성분이 있으면 반드시 구체적인 용량 정보(1일 최대용량)를 주의사항에 명시**
+8. 주의사항과 금기사항을 자연스럽게 언급
+9. 필요시 대안도 제안
+10. 마지막에 의료진 상담 권고
 
 **중요 지침:**
 - "YouTube에서는...", "뉴스에서...", "영상에서...", "Excel DB에서...", "PubChem에서..." 같은 **출처 언급 절대 금지**
 - 모든 정보를 **하나의 통합된 지식**처럼 자연스럽게 설명
 - 예: "전문가들은...", "알려진 바로는...", "일반적으로...", "최근에는..." 같은 표현 사용
 - 뉴스 정보는 "참고로..." 또는 "💡 알아두면 좋은 정보" 섹션에 자연스럽게 추가
+- ⚠️ **용량주의 성분이 있으면 반드시 주의사항에 포함하고 처방 필요성 강조**
 
 **답변 구조 (반드시 이 순서로):**
 1. **결론**: "네, {medicine_name}은(는) {usage_context}에 사용하실 수 있습니다" 또는 "아니요, 권장하지 않습니다"
 2. **상세한 작용기전**: 각 주성분의 구체적인 작용 메커니즘을 설명
 3. **효과**: 해당 증상에 어떤 효과가 있는지 구체적으로 설명
-4. **주의사항**: 구체적인 주의사항과 금기사항
+4. **주의사항**: 구체적인 주의사항과 금기사항 (⚠️ 용량주의 성분이 있으면 반드시 포함하고 처방 필요성 강조, 구체적인 용량 정보 명시)
 5. **대안**: 위에서 제공된 동적 대안 약품 분석 결과를 바탕으로 구체적인 대안 약품 제안 (실제 약품명만 사용, 이부프로펜/나프록센 같은 성분명 사용 금지, 각 대안의 주성분과 효과 근거 포함)
 6. **💡 알아두면 좋은 정보** (⚠️ 중요: 이 섹션을 풍부하게 작성하세요):
    - 추가 실전 정보에서 발견한 **모든 흥미로운 사실** (치매 예방, 뇌세포 보호, 면역력 강화 등)
@@ -607,23 +649,23 @@ STEP 4: 사용 불가 (신뢰도: high)
     
     def _find_similar_medicines_dynamically(self, medicine_name: str, usage_context: str, excel_info: Dict) -> List[Dict]:
         """Excel DB에서 동적으로 유사 약품 검색 (동일 성분 우선순위)"""
-        print(f"🔍 동적 유사 약품 검색: {medicine_name} → {usage_context}")
+        # 동적 유사 약품 검색
         
         # 대상 약품의 주성분 추출
         target_ingredients = self._extract_ingredients_from_excel_info(excel_info)
-        print(f"  대상 약품 주성분: {target_ingredients}")
+        # 대상 약품 주성분
         
         # 1단계: 동일 성분 약품 검색 (최고 우선순위)
         same_ingredient_medicines = self._find_medicines_with_same_ingredients(medicine_name, target_ingredients)
-        print(f"  동일 성분 약품: {[med['name'] for med in same_ingredient_medicines]}")
+        # 동일 성분 약품
         
         # 2단계: 유사 성분 약품 검색 (2순위)
         similar_ingredient_medicines = self._find_medicines_with_similar_ingredients(medicine_name, target_ingredients)
-        print(f"  유사 성분 약품: {[med['name'] for med in similar_ingredient_medicines]}")
+        # 유사 성분 약품
         
         # 3단계: 효능 기반 약품 검색 (3순위)
         efficacy_based_medicines = self._find_medicines_by_efficacy(medicine_name, usage_context, target_ingredients)
-        print(f"  효능 기반 약품: {[med['name'] for med in efficacy_based_medicines]}")
+        # 효능 기반 약품
         
         # 우선순위별로 정렬하여 상위 3개 반환
         all_medicines = same_ingredient_medicines + similar_ingredient_medicines + efficacy_based_medicines
@@ -894,7 +936,7 @@ STEP 4: 사용 불가 (신뢰도: high)
     
     def _search_youtube_info(self, medicine_name: str, usage_context: str, ingredients: List[str]) -> Dict:
         """YouTube에서 약품/성분 관련 실전 정보 수집 (범용화)"""
-        print(f"📺 YouTube 정보 수집: {medicine_name}")
+        # YouTube 정보 수집
         
         youtube_result = {
             'medicine_videos': [],
@@ -949,8 +991,7 @@ STEP 4: 사용 불가 (신뢰도: high)
                     f"{ingredient} 효과"
                 ])
             
-            print(f"  검색어 목록: 총 {len(search_queries)}개")
-            print(f"  주요 검색어: {search_queries[:5]}...")
+            # 검색어 목록
             
             all_videos = []
             
@@ -980,7 +1021,7 @@ STEP 4: 사용 불가 (신뢰도: high)
                         all_videos.append(video)
                         
                 except Exception as e:
-                    print(f"  ⚠️ '{query}' 검색 실패: {e}")
+                    # 검색 실패
                     continue
             
             # 중복 제거 (video_id 기준)
@@ -1011,11 +1052,7 @@ STEP 4: 사용 불가 (신뢰도: high)
                 youtube_result['usage_videos'] = usage_videos[:5]  # 5개로 증가
                 youtube_result['total_videos'] = len(unique_videos)
             
-            print(f"  ✅ YouTube 정보 수집 완료:")
-            print(f"     - 약품 영상: {len(medicine_videos)}개")
-            print(f"     - 성분 영상: {len(ingredient_videos)}개")
-            print(f"     - 사용법 영상: {len(usage_videos)}개")
-            print(f"     - 자막 있음: {youtube_result['has_transcript_count']}개")
+            # YouTube 정보 수집 완료
             
         except Exception as e:
             print(f"  ❌ YouTube 검색 오류: {e}")
@@ -1024,7 +1061,7 @@ STEP 4: 사용 불가 (신뢰도: high)
     
     def _search_naver_news_info(self, medicine_name: str, ingredients: List[str]) -> Dict:
         """네이버 뉴스에서 약품 관련 추가 정보 수집 (신제품, 트렌드 등)"""
-        print(f"📰 네이버 뉴스 정보 수집: {medicine_name}")
+        # 네이버 뉴스 정보 수집
         
         try:
             # 네이버 뉴스 API로 추가 정보 검색 (개수 증가)
@@ -1088,3 +1125,27 @@ STEP 4: 사용 불가 (신뢰도: high)
                 formatted.append(f"     {news['description'][:250]}...")  # 설명 추가
         
         return "\n".join(formatted) if formatted else "최신 뉴스 정보 없음"
+    
+    def _format_dosage_warning_info(self, dosage_warning_info: Dict) -> str:
+        """용량주의 성분 정보를 포맷팅"""
+        if not dosage_warning_info or not dosage_warning_info.get('has_warnings', False):
+            return "용량주의 성분 없음"
+        
+        warnings = dosage_warning_info.get('warnings', [])
+        if not warnings:
+            return "용량주의 성분 없음"
+        
+        formatted = ["⚠️ 용량주의 성분 발견:"]
+        for warning in warnings:
+            ingredient = warning.get('ingredient', '')
+            dosage_info = warning.get('dosage_info', {})
+            max_dose = dosage_info.get('max_daily_dose', '정보 없음')
+            remarks = dosage_info.get('remarks', '')
+            
+            formatted.append(f"  - {ingredient}: 1일 최대용량 {max_dose}")
+            if remarks and remarks != 'nan':
+                formatted.append(f"    비고: {remarks}")
+        
+        formatted.append("\n중요: 용량주의 성분이 포함된 약품은 반드시 의사나 약사의 처방에 따라 사용하세요.")
+        
+        return "\n".join(formatted)

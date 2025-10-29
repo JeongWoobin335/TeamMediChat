@@ -40,9 +40,8 @@
                     <div class="help-content">
                         <p><strong>💊 의약품 질문 예시:</strong></p>
                         <ul>
-                            <li>두통약의 부작용이 궁금해요</li>
-                            <li>감기약 추천해주세요</li>
-                            <li>혈압약 복용 중인데 주의사항이 있나요?</li>
+                            <li>타이레놀을 감기에 먹어도 되나요?</li>
+                            <li>아세트아미노펜이 뭔가요?</li>
                         </ul>
                         <p><strong>🔄 대화 맥락:</strong></p>
                         <p>이전 대화 내용을 기억하여 연속된 질문에 답변합니다.</p>
@@ -62,6 +61,10 @@
                     <h1>TeamMediChat</h1>
                 </div>
                 <div class="chat-header-right">
+                    <button class="pharmacy-find-btn" id="pharmacyFindBtn" title="근처 약국 찾기">
+                        <i class="fas fa-map-marker-alt"></i>
+                        약국 찾기
+                    </button>
                     <span class="session-info" id="sessionInfo">
                         <i class="fas fa-circle"></i> 연결 중...
                     </span>
@@ -78,8 +81,7 @@
                     <div class="message-content">
                         <div class="message-text">
                             안녕하세요! 🏥 TeamMediChat입니다.<br>
-                            의약품에 대한 질문을 자유롭게 해주세요.<br>
-                            이전 대화 내용을 기억하여 연속된 질문에도 답변할 수 있습니다.
+                            의약품에 대한 질문을 자유롭게 해주세요.
                         </div>
                         <div class="message-timestamp">지금</div>
                     </div>
@@ -143,6 +145,62 @@
         </div>
     </div>
     
+    <!-- 카카오 맵 모달 -->
+    <div class="map-modal" id="mapModal">
+        <div class="map-modal-content">
+            <div class="map-modal-header">
+                <h3><i class="fas fa-map-marker-alt"></i> 근처 약국 찾기</h3>
+                <button class="map-modal-close" id="mapModalClose">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            
+            <!-- 주소 입력 섹션 -->
+            <div class="address-input-section" id="addressInputSection">
+                <div class="address-input-header">
+                    <h4><i class="fas fa-search-location"></i> 정확한 위치 설정</h4>
+                    <p>정확한 약국 정보를 위해 상세 주소를 입력해주세요</p>
+                </div>
+                <div class="address-input-form">
+                    <div class="address-input-group">
+                        <label for="addressInput">주소 입력:</label>
+                        <input type="text" id="addressInput" placeholder="예: 전남 순천시 저전동 123-45" />
+                        <button id="searchAddressBtn" class="search-address-btn">
+                            <i class="fas fa-search"></i> 검색
+                        </button>
+                    </div>
+                    <div class="address-suggestions" id="addressSuggestions" style="display: none;">
+                        <!-- 주소 검색 결과가 여기에 표시됨 -->
+                    </div>
+                </div>
+            </div>
+            <div class="map-modal-body">
+                <div class="map-container" id="mapContainer">
+                    <div class="map_wrap">
+                        <div id="map" style="width:100%;height:100%;position:relative;overflow:hidden;"></div>
+                        <ul id="category">
+                            <li id="HP8" data-order="0"> 
+                                <span class="category_bg hospital"></span>
+                                병원
+                            </li>       
+                            <li id="PM9" data-order="1"> 
+                                <span class="category_bg pharmacy"></span>
+                                약국
+                            </li>  
+                        </ul>
+                        
+                        <!-- 위치 제어 버튼들 (제거됨) -->
+                        
+                        <!-- 위치 설정 안내 메시지 (제거됨) -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 카카오 맵 API 직접 로드 (services 포함) -->
+    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=bd76054a45b215e5cf1929d0e70dd061&libraries=services"></script>
+    <!-- chat.js 로드 (test.js는 동적으로 로드됨) -->
     <script src="/static/chat.js"></script>
 </body>
 </html>

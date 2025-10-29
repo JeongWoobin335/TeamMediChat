@@ -3,6 +3,7 @@ let currentSessionId = null;
 let websocket = null;
 let isConnected = false;
 let typingTimer = null;
+let userLocation = null; // 사용자 위치 정보 저장
 
 // DOM 요소들
 const chatMessages = document.getElementById('chatMessages');
@@ -29,8 +30,20 @@ const imagePreview = document.getElementById('imagePreview');
 const previewImage = document.getElementById('previewImage');
 const removeImageBtn = document.getElementById('removeImageBtn');
 
+// 카카오 맵 모달 관련 요소들
+const pharmacyFindBtn = document.getElementById('pharmacyFindBtn');
+const mapModal = document.getElementById('mapModal');
+const mapModalClose = document.getElementById('mapModalClose');
+
+// 주소 입력 관련 요소들
+const addressInputSection = document.getElementById('addressInputSection');
+const addressInput = document.getElementById('addressInput');
+const searchAddressBtn = document.getElementById('searchAddressBtn');
+const addressSuggestions = document.getElementById('addressSuggestions');
+
 // 전역 변수
 let currentImageData = null;
+
 
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
@@ -40,9 +53,9 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // 앱 초기화
-function initializeApp() {
-    // 새 세션 생성
-    createNewSession();
+async function initializeApp() {
+    // 기존 세션이 있는지 확인 후 로드
+    await loadExistingSessions();
     
     // 입력 필드 자동 크기 조정
     autoResizeTextarea();
@@ -50,6 +63,40 @@ function initializeApp() {
     // 모바일 사이드바 토글
     if (window.innerWidth <= 768) {
         sidebar.classList.remove('show');
+    }
+    
+    // 사용자 위치 정보 로드
+    loadUserLocationFromStorage();
+}
+
+// 기존 세션 로드 또는 새 세션 생성
+async function loadExistingSessions() {
+    try {
+        const response = await fetch('/api/sessions');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.sessions && data.sessions.length > 0) {
+                // 기존 세션이 있으면 가장 최근 세션 사용
+                const latestSession = data.sessions[0]; // 가장 최근 세션
+                currentSessionId = latestSession.session_id;
+                
+                // WebSocket 연결
+                connectWebSocket(currentSessionId);
+                
+                // 해당 세션의 대화 내용 로드
+                await loadSessionMessages(currentSessionId);
+            } else {
+                // 기존 세션이 없으면 새로 생성
+                await createNewSession();
+            }
+        } else {
+            // API 오류 시 새 세션 생성
+            await createNewSession();
+        }
+    } catch (error) {
+        console.error('세션 로드 오류:', error);
+        // 오류 시 새 세션 생성
+        await createNewSession();
     }
 }
 
@@ -64,6 +111,24 @@ function setupEventListeners() {
     imageUploadBtn.addEventListener('click', () => imageInput.click());
     imageInput.addEventListener('change', handleImageUpload);
     removeImageBtn.addEventListener('click', removeImage);
+    
+    // 카카오 맵 모달
+    pharmacyFindBtn.addEventListener('click', openMapModal);
+    mapModalClose.addEventListener('click', closeMapModal);
+    mapModal.addEventListener('click', function(e) {
+        if (e.target === mapModal) {
+            closeMapModal();
+        }
+    });
+    
+    // 주소 입력 관련 이벤트
+    searchAddressBtn.addEventListener('click', searchAddress);
+    addressInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            searchAddress();
+        }
+    });
+    addressInput.addEventListener('input', handleAddressInput);
     
     // 사이드바 토글
     sidebarToggle.addEventListener('click', toggleSidebar);
@@ -88,7 +153,6 @@ function connectWebSocket(sessionId) {
         websocket = new WebSocket(wsUrl);
         
         websocket.onopen = function(event) {
-            console.log('WebSocket 연결됨');
             isConnected = true;
             updateConnectionStatus(true);
         };
@@ -99,7 +163,6 @@ function connectWebSocket(sessionId) {
         };
         
         websocket.onclose = function(event) {
-            console.log('WebSocket 연결 끊어짐');
             isConnected = false;
             updateConnectionStatus(false);
             
@@ -128,7 +191,6 @@ function connectWebSocket(sessionId) {
 function handleWebSocketMessage(data) {
     switch (data.type) {
         case 'connection_established':
-            console.log('연결 성공:', data.message);
             break;
             
         case 'chat_message':
@@ -156,7 +218,7 @@ function handleWebSocketMessage(data) {
             break;
             
         default:
-            console.log('알 수 없는 메시지 타입:', data.type);
+            break;
     }
 }
 
@@ -255,11 +317,12 @@ function sendMessage() {
     // 로딩 표시
     showLoading();
     
-    // WebSocket으로 메시지 전송
+    // WebSocket으로 메시지 전송 (위치 정보 포함)
     const messageData = {
         type: 'chat_message',
         content: message,
-        image_data: currentImageData ? Array.from(currentImageData) : null  // 이미지 데이터 포함
+        image_data: currentImageData ? Array.from(currentImageData) : null,  // 이미지 데이터 포함
+        user_location: userLocation // 사용자 위치 정보 추가
     };
     
     websocket.send(JSON.stringify(messageData));
@@ -346,7 +409,7 @@ function showLoading() {
     // 30초 후 자동으로 로딩 숨기기 (안전장치)
     setTimeout(() => {
         if (loadingOverlay.classList.contains('show')) {
-            console.log('로딩 타임아웃 - 자동으로 숨김');
+            // 로딩 타임아웃 - 자동으로 숨김
             hideLoading();
         }
     }, 30000);
@@ -400,7 +463,7 @@ async function createNewSession() {
             // 세션 목록 새로고침
             loadSessions();
             
-            console.log('새 세션 생성됨:', currentSessionId);
+            // 새 세션 생성됨
         } else {
             throw new Error('세션 생성 실패');
         }
@@ -447,8 +510,18 @@ function displaySessions(sessions) {
         sessionMeta.className = 'session-meta';
         sessionMeta.textContent = `${session.message_count}개 메시지`;
         
+        // 삭제 버튼 추가
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'session-delete-btn';
+        deleteBtn.title = '세션 삭제';
+        deleteBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // 클릭 이벤트 전파 방지
+            deleteSession(session.session_id);
+        });
+        
         sessionItem.appendChild(sessionTitle);
         sessionItem.appendChild(sessionMeta);
+        sessionItem.appendChild(deleteBtn);
         
         sessionItem.addEventListener('click', () => {
             switchSession(session.session_id);
@@ -459,7 +532,7 @@ function displaySessions(sessions) {
 }
 
 // 세션 전환
-function switchSession(sessionId) {
+async function switchSession(sessionId) {
     if (sessionId === currentSessionId) return;
     
     currentSessionId = sessionId;
@@ -473,12 +546,68 @@ function switchSession(sessionId) {
     // 채팅 영역 초기화
     clearChatMessages();
     
+    // 해당 세션의 대화 내용 로드
+    await loadSessionMessages(sessionId);
+    
     // 세션 목록 새로고침
     loadSessions();
     
     // 모바일에서 사이드바 닫기
     if (window.innerWidth <= 768) {
         sidebar.classList.remove('show');
+    }
+}
+
+// 세션의 대화 내용 로드
+async function loadSessionMessages(sessionId) {
+    try {
+        const response = await fetch(`/api/sessions/${sessionId}/messages`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.messages && data.messages.length > 0) {
+                // 기존 환영 메시지 제거
+                clearChatMessages();
+                
+                // 대화 내용 표시
+                data.messages.forEach(message => {
+                    displayMessage(message.role, message.content, message.timestamp);
+                });
+                
+                // 스크롤을 맨 아래로
+                scrollToBottom();
+            }
+        } else {
+            console.error('세션 메시지 로드 실패:', response.status);
+        }
+    } catch (error) {
+        console.error('세션 메시지 로드 오류:', error);
+    }
+}
+
+// 세션 삭제
+async function deleteSession(sessionId) {
+    if (confirm('이 세션을 삭제하시겠습니까?')) {
+        try {
+            const response = await fetch(`/api/sessions/${sessionId}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                // 현재 세션이 삭제된 세션이면 새 세션 생성
+                if (sessionId === currentSessionId) {
+                    await createNewSession();
+                }
+                
+                // 세션 목록 새로고침
+                loadSessions();
+            } else {
+                console.error('세션 삭제 실패:', response.status);
+                alert('세션 삭제에 실패했습니다.');
+            }
+        } catch (error) {
+            console.error('세션 삭제 오류:', error);
+            alert('세션 삭제 중 오류가 발생했습니다.');
+        }
     }
 }
 
@@ -492,8 +621,7 @@ function clearChatMessages() {
             <div class="message-content">
                 <div class="message-text">
                     안녕하세요! 🏥 TeamMediChat입니다.<br>
-                    의약품에 대한 질문을 자유롭게 해주세요.<br>
-                    이전 대화 내용을 기억하여 연속된 질문에도 답변할 수 있습니다.
+                    의약품에 대한 질문을 자유롭게 해주세요.
                 </div>
                 <div class="message-timestamp">지금</div>
             </div>
@@ -573,7 +701,7 @@ function handleImageUpload(event) {
         previewImage.src = imageData;
         imageUploadSection.style.display = 'block';
         
-        console.log('이미지 업로드 완료:', file.name, file.size, 'bytes');
+        // 이미지 업로드 완료
     };
     
     reader.readAsArrayBuffer(file);
@@ -641,3 +769,302 @@ window.addEventListener('beforeunload', function() {
         websocket.close();
     }
 });
+
+// ==================== 카카오 맵 관련 함수들 ====================
+
+// 카카오 맵 API 로딩 대기 함수
+function waitForKakaoMapAPI() {
+    return new Promise((resolve, reject) => {
+        if (typeof kakao !== 'undefined' && kakao.maps && kakao.maps.services && kakao.maps.services.Places) {
+            // 카카오 맵 API 및 Places 서비스 이미 로드됨
+            resolve();
+            return;
+        }
+        
+        // 카카오 맵 API 및 Places 서비스 로딩 대기 중
+        const checkInterval = setInterval(() => {
+            if (typeof kakao !== 'undefined' && kakao.maps && kakao.maps.services && kakao.maps.services.Places) {
+                clearInterval(checkInterval);
+                // 카카오 맵 API 및 Places 서비스 로딩 완료
+                resolve();
+            }
+        }, 100);
+        
+        // 10초 타임아웃
+        setTimeout(() => {
+            clearInterval(checkInterval);
+            reject(new Error('카카오 맵 API 또는 Places 서비스 로딩 타임아웃'));
+        }, 10000);
+    });
+}
+
+// test.js 동적 로딩 함수
+function loadKakaoMapScript() {
+    return new Promise(async (resolve, reject) => {
+        try {
+            // 먼저 카카오 맵 API 로딩 대기
+            await waitForKakaoMapAPI();
+            
+            // 이미 로드되었는지 확인
+            if (typeof initializeKakaoMap === 'function') {
+                // test.js 이미 로드됨
+                resolve();
+                return;
+            }
+            
+            // 이미 로딩 중인지 확인
+            if (window.kakaoMapLoading) {
+                // test.js 로딩 중
+                // 로딩 완료까지 대기
+                const checkInterval = setInterval(() => {
+                    if (typeof initializeKakaoMap === 'function') {
+                        clearInterval(checkInterval);
+                        resolve();
+                    }
+                }, 100);
+                return;
+            }
+            
+            // test.js 동적 로딩 시작
+            window.kakaoMapLoading = true;
+            
+            const script = document.createElement('script');
+            script.src = '/static/test.js';
+            script.onload = () => {
+                // test.js 로드 완료
+                window.kakaoMapLoading = false;
+                resolve();
+            };
+            script.onerror = (error) => {
+                console.error('❌ test.js 로드 실패:', error);
+                window.kakaoMapLoading = false;
+                reject(error);
+            };
+            document.head.appendChild(script);
+        } catch (error) {
+            reject(error);
+        }
+    });
+}
+
+// 카카오 맵 모달 열기
+async function openMapModal() {
+    // 카카오 맵 모달 열기 시작
+    
+    mapModal.classList.add('show');
+    
+    try {
+        // test.js 로드 대기
+        await loadKakaoMapScript();
+        
+        // 맵 초기화
+        if (typeof initializeKakaoMap === 'function') {
+            // test.js의 맵 초기화 함수 사용
+            const map = initializeKakaoMap('map');
+            if (map) {
+                // 모달이 완전히 표시된 후 맵 크기 재조정
+                setTimeout(() => {
+                    map.relayout();
+                    // 맵 크기 재조정 완료
+                }, 100);
+                // 맵 초기화 완료
+            } else {
+                console.error('❌ 맵 초기화 실패');
+                showError('맵을 초기화할 수 없습니다.');
+            }
+        } else {
+            console.error('❌ initializeKakaoMap 함수를 찾을 수 없음');
+            showError('맵 초기화 함수를 찾을 수 없습니다.');
+        }
+    } catch (error) {
+        console.error('❌ 맵 로딩 중 오류:', error);
+        showError('맵을 로드할 수 없습니다: ' + error.message);
+    }
+}
+
+// ===== 위치 정보 관련 함수들 =====
+
+// 저장된 사용자 위치 정보 로드 (세션 기반)
+function loadUserLocationFromStorage() {
+    try {
+        const savedLocation = sessionStorage.getItem('userLocation');
+        if (savedLocation) {
+            userLocation = JSON.parse(savedLocation);
+            return userLocation;
+        }
+    } catch (error) {
+        console.error('❌ 위치 정보 로드 실패:', error);
+    }
+    
+    userLocation = null;
+    return null;
+}
+
+// 사용자 위치 정보 업데이트 (카카오 맵에서 호출)
+function updateUserLocation(lat, lng) {
+    userLocation = {
+        lat: lat,
+        lng: lng,
+        timestamp: Date.now()
+    };
+    
+    // 세션 스토리지에 저장 (브라우저 탭 닫으면 삭제됨)
+    sessionStorage.setItem('userLocation', JSON.stringify(userLocation));
+}
+
+// 근처 약국 정보를 답변에 추가하는 함수
+function addPharmacyInfoToAnswer(answer, pharmacies) {
+    if (!pharmacies || pharmacies.length === 0) {
+        return answer;
+    }
+    
+    let pharmacyInfo = '\n\n🏥 **근처 약국 정보:**\n';
+    
+    pharmacies.forEach((pharmacy, index) => {
+        pharmacyInfo += `${index + 1}. **${pharmacy.name}**\n`;
+        pharmacyInfo += `   📍 ${pharmacy.road_address || pharmacy.address}\n`;
+        if (pharmacy.phone) {
+            pharmacyInfo += `   📞 ${pharmacy.phone}\n`;
+        }
+        pharmacyInfo += `   📏 거리: ${pharmacy.distance}m\n\n`;
+    });
+    
+    pharmacyInfo += '💡 **참고:** 위 약국들은 현재 위치 기준으로 가장 가까운 곳들입니다. 정확한 약품 구매 가능 여부는 약국에 직접 문의하시기 바랍니다.';
+    
+    return answer + pharmacyInfo;
+}
+
+// 약국 정보가 포함된 답변을 표시하는 함수
+function displayAnswerWithPharmacy(answer, pharmacies) {
+    const enhancedAnswer = addPharmacyInfoToAnswer(answer, pharmacies);
+    displayMessage('assistant', enhancedAnswer, new Date().toISOString());
+}
+
+// 카카오 맵 모달 닫기
+function closeMapModal() {
+    mapModal.classList.remove('show');
+}
+
+// ==================== 주소 검색 관련 함수들 ====================
+
+// 주소 검색 함수
+async function searchAddress() {
+    const query = addressInput.value.trim();
+    if (!query) {
+        showError('주소를 입력해주세요.');
+        return;
+    }
+    
+    try {
+        searchAddressBtn.disabled = true;
+        searchAddressBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 검색 중...';
+        
+        // 카카오 주소 검색 API 사용
+        const geocoder = new kakao.maps.services.Geocoder();
+        
+        geocoder.addressSearch(query, function(result, status) {
+            searchAddressBtn.disabled = false;
+            searchAddressBtn.innerHTML = '<i class="fas fa-search"></i> 검색';
+            
+            if (status === kakao.maps.services.Status.OK) {
+                displayAddressSuggestions(result);
+            } else {
+                showError('주소를 찾을 수 없습니다. 다른 주소를 입력해주세요.');
+            }
+        });
+        
+    } catch (error) {
+        searchAddressBtn.disabled = false;
+        searchAddressBtn.innerHTML = '<i class="fas fa-search"></i> 검색';
+        console.error('주소 검색 오류:', error);
+        showError('주소 검색 중 오류가 발생했습니다.');
+    }
+}
+
+// 주소 검색 결과 표시
+function displayAddressSuggestions(results) {
+    addressSuggestions.innerHTML = '';
+    
+    if (results.length === 0) {
+        addressSuggestions.style.display = 'none';
+        return;
+    }
+    
+    results.forEach((result, index) => {
+        const suggestionItem = document.createElement('div');
+        suggestionItem.className = 'address-suggestion-item';
+        suggestionItem.innerHTML = `
+            <div class="address-name">${result.place_name || result.address_name}</div>
+            <div class="address-detail">${result.address_name}</div>
+        `;
+        
+        suggestionItem.addEventListener('click', function() {
+            selectAddress(result);
+        });
+        
+        addressSuggestions.appendChild(suggestionItem);
+    });
+    
+    addressSuggestions.style.display = 'block';
+}
+
+// 주소 선택 함수
+function selectAddress(addressResult) {
+    const position = new kakao.maps.LatLng(addressResult.y, addressResult.x);
+    
+    // 주소 입력 섹션 숨기기
+    addressInputSection.style.display = 'none';
+    
+    // 맵에 마커 표시
+    if (typeof displayMarker === 'function') {
+        const message = `<div style="padding:5px;">
+            <strong>선택한 위치</strong><br>
+            <small>${addressResult.address_name}</small>
+        </div>`;
+        displayMarker(position, message);
+    }
+    
+    // 사용자 위치 정보 업데이트
+    updateUserLocation(addressResult.y, addressResult.x);
+    
+    // 주소 위치 정보 저장 (다음에 맵을 열 때 복원용)
+    saveAddressLocation(addressResult);
+    
+    // 검색 결과 숨기기
+    addressSuggestions.style.display = 'none';
+}
+
+// 주소 위치 정보 저장 (세션 기반)
+function saveAddressLocation(addressResult) {
+    try {
+        const addressData = {
+            lat: addressResult.y,
+            lng: addressResult.x,
+            address: addressResult.address_name,
+            timestamp: Date.now()
+        };
+        
+        sessionStorage.setItem('savedAddressLocation', JSON.stringify(addressData));
+    } catch (error) {
+        console.error('❌ 주소 위치 정보 저장 실패:', error);
+    }
+}
+
+// 주소 입력 처리
+function handleAddressInput() {
+    const query = addressInput.value.trim();
+    if (query.length < 2) {
+        addressSuggestions.style.display = 'none';
+        return;
+    }
+    
+    // 실시간 검색 (디바운싱)
+    clearTimeout(window.addressSearchTimeout);
+    window.addressSearchTimeout = setTimeout(() => {
+        if (query.length >= 2) {
+            searchAddress();
+        }
+    }, 300);
+}
+
+

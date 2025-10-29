@@ -177,6 +177,32 @@ body {
     gap: 15px;
 }
 
+.chat-header-right {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.pharmacy-find-btn {
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    border: none;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pharmacy-find-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+}
+
 .chat-header-left h1 {
     color: #495057;
     font-size: 1.5rem;
@@ -568,6 +594,239 @@ body {
     background: #5a6268;
 }
 
+/* 카카오 맵 모달 */
+.map-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.map-modal.show {
+    display: flex;
+}
+
+.map-modal-content {
+    background: #ffffff;
+    border-radius: 16px;
+    width: 90%;
+    height: 80%;
+    max-width: 1000px;
+    max-height: 700px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
+
+.map-modal-header {
+    padding: 20px 30px;
+    border-bottom: 1px solid #e9ecef;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #ffffff;
+}
+
+.map-modal-header h3 {
+    color: #495057;
+    font-size: 1.3rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.map-modal-header h3 i {
+    color: #28a745;
+}
+
+.map-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: #6c757d;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 50%;
+    transition: all 0.2s;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.map-modal-close:hover {
+    background-color: #f8f9fa;
+    color: #dc3545;
+}
+
+.map-modal-body {
+    flex: 1;
+    padding: 0;
+    overflow: hidden;
+}
+
+.map-container {
+    width: 100%;
+    height: 100%;
+    position: relative;
+}
+
+/* 카카오 맵 스타일 */
+.map_wrap, .map_wrap * {
+    margin: 0; 
+    padding: 0;
+    font-family: 'Malgun Gothic', dotum, '돋움', sans-serif;
+    font-size: 12px;
+}
+
+.map_wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+#category {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    border-radius: 5px;
+    border: 1px solid #909090;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.4);
+    background: #fff;
+    overflow: hidden;
+    z-index: 2;
+}
+
+#category li {
+    float: left;
+    list-style: none;
+    width: 50px;
+    border-right: 1px solid #acacac;
+    padding: 6px 0;
+    text-align: center;
+    cursor: pointer;
+}
+
+#category li.on {
+    background: #eee;
+}
+
+#category li:hover {
+    background: #ffe6e6;
+    border-left: 1px solid #acacac;
+    margin-left: -1px;
+}
+
+#category li:last-child {
+    margin-right: 0;
+    border-right: 0;
+}
+
+#category li span {
+    display: block;
+    margin: 0 auto 3px;
+    width: 27px;
+    height: 28px;
+}
+
+#category li .category_bg {
+    background: url(https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/places_category.png) no-repeat;
+}
+
+#category li .hospital {
+    background-position: -10px 0;
+}
+
+#category li .pharmacy {
+    background-position: -10px -36px;
+}
+
+#category li.on .category_bg {
+    background-position-x: -46px;
+}
+
+/* 채팅 메시지 스타일 */
+
+.placeinfo_wrap {
+    position: absolute;
+    bottom: 28px;
+    left: -150px;
+    width: 300px;
+}
+
+.placeinfo {
+    position: relative;
+    width: 100%;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    border-bottom: 2px solid #ddd;
+    padding-bottom: 10px;
+    background: #fff;
+}
+
+.placeinfo:nth-of-type(n) {
+    border: 0;
+    box-shadow: 0px 1px 2px #888;
+}
+
+.placeinfo_wrap .after {
+    content: '';
+    position: relative;
+    margin-left: -12px;
+    left: 50%;
+    width: 22px;
+    height: 12px;
+    background: url('https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/vertex_white.png');
+}
+
+.placeinfo a, .placeinfo a:hover, .placeinfo a:active {
+    color: #fff;
+    text-decoration: none;
+}
+
+.placeinfo a, .placeinfo span {
+    display: block;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.placeinfo span {
+    margin: 5px 5px 0 5px;
+    cursor: default;
+    font-size: 13px;
+}
+
+.placeinfo .title {
+    font-weight: bold;
+    font-size: 14px;
+    border-radius: 6px 6px 0 0;
+    margin: -1px -1px 0 -1px;
+    padding: 10px;
+    color: #fff;
+    background: #d95050;
+    background: #d95050 url(https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/arrow_white.png) no-repeat right 14px center;
+}
+
+.placeinfo .tel {
+    color: #0f7833;
+}
+
+.placeinfo .jibun {
+    color: #999;
+    font-size: 11px;
+    margin-top: 0;
+}
+
 /* 반응형 디자인 */
 @media (max-width: 768px) {
     .sidebar {
@@ -634,4 +893,167 @@ body {
         padding: 12px 14px;
         font-size: 0.9rem;
     }
+}
+
+/* 위치 설정 버튼 스타일 (제거됨) */
+
+/* 위치 안내 메시지 스타일 (제거됨) */
+
+/* 세션 삭제 버튼 */
+.session-item {
+    position: relative;
+}
+
+.session-delete-btn {
+    position: absolute;
+    top: 50%;
+    right: 10px;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 3px;
+    opacity: 0.6;
+    transition: all 0.3s ease;
+}
+
+.session-item:hover .session-delete-btn {
+    opacity: 1;
+}
+
+.session-delete-btn:hover {
+    background: #ff0019;
+}
+
+/* 커스텀 X 아이콘 */
+.session-delete-btn::before {
+    content: "✕";
+    font-size: 20px;
+    font-weight: bold;
+    color: white;  
+    background: #ff0019;  
+    border-radius: 50%;  
+    width: 26px;  
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+/* 주소 입력 섹션 스타일 */
+.address-input-section {
+    background: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+    padding: 20px;
+    margin-bottom: 0;
+}
+
+.address-input-header {
+    margin-bottom: 15px;
+}
+
+.address-input-header h4 {
+    color: #495057;
+    margin: 0 0 5px 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.address-input-header p {
+    color: #6c757d;
+    margin: 0;
+    font-size: 14px;
+}
+
+.address-input-group {
+    display: flex;
+    gap: 10px;
+    align-items: end;
+}
+
+.address-input-group label {
+    font-weight: 500;
+    color: #495057;
+    margin-bottom: 5px;
+    display: block;
+    font-size: 14px;
+}
+
+.address-input-group input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+.address-input-group input:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.search-address-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background-color 0.15s ease-in-out;
+    white-space: nowrap;
+}
+
+.search-address-btn:hover {
+    background: #0056b3;
+}
+
+.search-address-btn:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+}
+
+.address-suggestions {
+    margin-top: 10px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: white;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.address-suggestion-item {
+    padding: 10px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f3f4;
+    transition: background-color 0.15s ease-in-out;
+}
+
+.address-suggestion-item:hover {
+    background-color: #f8f9fa;
+}
+
+.address-suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.address-suggestion-item .address-name {
+    font-weight: 500;
+    color: #495057;
+    margin-bottom: 2px;
+}
+
+.address-suggestion-item .address-detail {
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.session-delete-btn:hover::before {
+    color: white;
+    transform: scale(1.2);
 }
