@@ -177,11 +177,11 @@ class NaverNewsAPI:
         }
         
         try:
-            # 1. 약품명 직접 검색 (최신순 - 신제품, 뉴스 등) - 더 많이
+            # 🚀 성능 최적화: 검색 결과 수 감소
             print(f"📰 약품 최신 소식 검색: {medicine_name}")
             medicine_news = self.search_news(
                 query=medicine_name,
-                display=min(max_results, 100),  # 최대한 많이
+                display=min(max_results, 15),  # 100개 → 15개로 감소
                 sort="date"
             )
             
@@ -198,13 +198,13 @@ class NaverNewsAPI:
             result["medicine_news"] = result["medicine_news"][:8]  # 8개로 증가
             result["product_news"] = result["product_news"][:5]  # 5개로 증가
             
-            # 2. 성분명 검색 (주요 성분 3개로 증가)
+            # 🚀 성능 최적화: 성분 검색 수 감소 (3개 → 2개, 10개 → 5개)
             if ingredients:
-                for ingredient in ingredients[:3]:  # 3개로 증가
+                for ingredient in ingredients[:2]:  # 3개 → 2개
                     print(f"📰 성분 트렌드 검색: {ingredient}")
                     ingredient_news = self.search_news(
                         query=ingredient,
-                        display=10,  # 10개로 증가
+                        display=5,  # 10개 → 5개
                         sort="date"
                     )
                     

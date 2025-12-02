@@ -4,6 +4,7 @@ let websocket = null;
 let isConnected = false;
 let typingTimer = null;
 let userLocation = null; // 사용자 위치 정보 저장
+let messagesLoaded = false; // 메시지 로드 상태 추적 (중복 방지용)
 
 // DOM 요소들
 const chatMessages = document.getElementById('chatMessages');
@@ -20,6 +21,8 @@ const sidebarToggleMobile = document.getElementById('sidebarToggleMobile');
 const sidebar = document.getElementById('sidebar');
 const newSessionBtn = document.getElementById('newSessionBtn');
 const sessionsList = document.getElementById('sessionsList');
+const sessionsToggleBtn = document.getElementById('sessionsToggleBtn');
+const sessionsToggleIcon = document.getElementById('sessionsToggleIcon');
 const sessionInfo = document.getElementById('sessionInfo');
 
 // 이미지 업로드 관련 요소들
@@ -47,6 +50,14 @@ let currentImageData = null;
 
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', function() {
+    // 스플래시 화면 제거
+    setTimeout(() => {
+        const splashScreen = document.getElementById('splashScreen');
+        if (splashScreen) {
+            splashScreen.remove();
+        }
+    }, 2500); // 2초 + 페이드아웃 애니메이션 시간
+    
     initializeApp();
     setupEventListeners();
     loadSessions();
@@ -80,11 +91,11 @@ async function loadExistingSessions() {
                 const latestSession = data.sessions[0]; // 가장 최근 세션
                 currentSessionId = latestSession.session_id;
                 
-                // WebSocket 연결
-                connectWebSocket(currentSessionId);
-                
-                // 해당 세션의 대화 내용 로드
+                // 해당 세션의 대화 내용 먼저 로드 (API 사용)
                 await loadSessionMessages(currentSessionId);
+                
+                // WebSocket 연결 (히스토리는 이미 로드했으므로 중복 방지)
+                connectWebSocket(currentSessionId);
             } else {
                 // 기존 세션이 없으면 새로 생성
                 await createNewSession();
@@ -111,6 +122,9 @@ function setupEventListeners() {
     imageUploadBtn.addEventListener('click', () => imageInput.click());
     imageInput.addEventListener('change', handleImageUpload);
     removeImageBtn.addEventListener('click', removeImage);
+    
+    // 세션 목록 토글
+    sessionsToggleBtn.addEventListener('click', toggleSessionsList);
     
     // 카카오 맵 모달
     pharmacyFindBtn.addEventListener('click', openMapModal);
@@ -194,6 +208,15 @@ function handleWebSocketMessage(data) {
             break;
             
         case 'chat_message':
+            // 사용자 메시지는 이미 클라이언트에서 표시했으므로 서버에서 받은 사용자 메시지는 무시
+            // (중복 방지: 서버는 브로드캐스트를 위해 사용자 메시지를 다시 보내지만, 
+            //  클라이언트에서는 이미 표시했으므로 assistant 메시지만 표시)
+            if (data.role === 'user') {
+                // 사용자 메시지는 무시 (이미 sendMessage()에서 표시함)
+                break;
+            }
+            
+            // assistant 메시지만 표시
             displayMessage(data.role, data.content, data.timestamp);
             // AI 답변을 받은 후 로딩 화면 숨기기
             if (data.role === 'assistant') {
@@ -202,7 +225,11 @@ function handleWebSocketMessage(data) {
             break;
             
         case 'chat_history':
-            displayChatHistory(data.history);
+            // API로 이미 메시지를 로드했다면 WebSocket 히스토리는 무시 (중복 방지)
+            if (!messagesLoaded) {
+                displayChatHistory(data.history);
+                messagesLoaded = true;
+            }
             break;
             
         case 'user_typing':
@@ -245,7 +272,15 @@ function displayChatHistory(history) {
             }
             currentRole = 'user';
             currentContent = [line.substring(4)];
+        } else if (line.startsWith('의사: ')) {
+            // 서버에서 "의사"로 보내므로 "AI" 대신 "의사" 확인
+            if (currentRole && currentContent.length > 0) {
+                displayMessage(currentRole, currentContent.join('\n'), new Date().toISOString());
+            }
+            currentRole = 'assistant';
+            currentContent = [line.substring(4)];
         } else if (line.startsWith('AI: ')) {
+            // 호환성을 위해 "AI: "도 지원
             if (currentRole && currentContent.length > 0) {
                 displayMessage(currentRole, currentContent.join('\n'), new Date().toISOString());
             }
@@ -277,7 +312,7 @@ function displayMessage(role, content, timestamp) {
     if (role === 'user') {
         avatar.innerHTML = '<i class="fas fa-user"></i>';
     } else {
-        avatar.innerHTML = '<i class="fas fa-hospital"></i>';
+        avatar.innerHTML = '<img src="/static/assets/logo_white.png" alt="TeamMediChat" style="width: 35px; height: 35px; vertical-align: middle;">';
     }
     
     const messageContent = document.createElement('div');
@@ -405,14 +440,6 @@ function hideTypingIndicator() {
 // 로딩 표시
 function showLoading() {
     loadingOverlay.classList.add('show');
-    
-    // 30초 후 자동으로 로딩 숨기기 (안전장치)
-    setTimeout(() => {
-        if (loadingOverlay.classList.contains('show')) {
-            // 로딩 타임아웃 - 자동으로 숨김
-            hideLoading();
-        }
-    }, 30000);
 }
 
 // 로딩 숨기기
@@ -434,7 +461,20 @@ function hideErrorModal() {
 
 // 사이드바 토글
 function toggleSidebar() {
-    sidebar.classList.toggle('show');
+    // 모바일에서는 show 클래스 토글
+    if (window.innerWidth <= 768) {
+        sidebar.classList.toggle('show');
+    } else {
+        // 데스크톱에서는 hidden 클래스 토글
+        sidebar.classList.toggle('hidden');
+        // 버튼 아이콘 변경
+        const icon = sidebarToggle.querySelector('i');
+        if (sidebar.classList.contains('hidden')) {
+            icon.className = 'fas fa-chevron-right';
+        } else {
+            icon.className = 'fas fa-bars';
+        }
+    }
 }
 
 // 새 세션 생성
@@ -450,6 +490,9 @@ async function createNewSession() {
         if (response.ok) {
             const data = await response.json();
             currentSessionId = data.session_id;
+            
+            // 메시지 로드 상태 초기화
+            messagesLoaded = false;
             
             // WebSocket 연결
             if (websocket) {
@@ -470,6 +513,19 @@ async function createNewSession() {
     } catch (error) {
         console.error('세션 생성 오류:', error);
         showError('새 세션을 생성할 수 없습니다.');
+    }
+}
+
+// 세션 목록 토글
+function toggleSessionsList() {
+    const isHidden = sessionsList.style.display === 'none';
+    
+    if (isHidden) {
+        sessionsList.style.display = 'block';
+        sessionsToggleBtn.classList.add('active');
+    } else {
+        sessionsList.style.display = 'none';
+        sessionsToggleBtn.classList.remove('active');
     }
 }
 
@@ -495,7 +551,7 @@ function displaySessions(sessions) {
         return;
     }
     
-    sessions.forEach(session => {
+    sessions.forEach((session, index) => {
         const sessionItem = document.createElement('div');
         sessionItem.className = 'session-item';
         if (session.session_id === currentSessionId) {
@@ -504,7 +560,7 @@ function displaySessions(sessions) {
         
         const sessionTitle = document.createElement('div');
         sessionTitle.className = 'session-title';
-        sessionTitle.textContent = `세션 ${session.session_id.substring(0, 8)}...`;
+        sessionTitle.textContent = `${sessions.length - index}번째 대화`;
         
         const sessionMeta = document.createElement('div');
         sessionMeta.className = 'session-meta';
@@ -513,7 +569,7 @@ function displaySessions(sessions) {
         // 삭제 버튼 추가
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'session-delete-btn';
-        deleteBtn.title = '세션 삭제';
+        deleteBtn.title = '대화 삭제';
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation(); // 클릭 이벤트 전파 방지
             deleteSession(session.session_id);
@@ -537,17 +593,20 @@ async function switchSession(sessionId) {
     
     currentSessionId = sessionId;
     
-    // WebSocket 재연결
-    if (websocket) {
-        websocket.close();
-    }
-    connectWebSocket(currentSessionId);
+    // 메시지 로드 상태 초기화
+    messagesLoaded = false;
     
     // 채팅 영역 초기화
     clearChatMessages();
     
-    // 해당 세션의 대화 내용 로드
+    // 해당 세션의 대화 내용 먼저 로드
     await loadSessionMessages(sessionId);
+    
+    // WebSocket 재연결 (히스토리는 이미 로드했으므로 중복 방지)
+    if (websocket) {
+        websocket.close();
+    }
+    connectWebSocket(currentSessionId);
     
     // 세션 목록 새로고침
     loadSessions();
@@ -573,20 +632,28 @@ async function loadSessionMessages(sessionId) {
                     displayMessage(message.role, message.content, message.timestamp);
                 });
                 
+                // 메시지 로드 완료 표시 (WebSocket 히스토리 중복 방지)
+                messagesLoaded = true;
+                
                 // 스크롤을 맨 아래로
                 scrollToBottom();
+            } else {
+                // 메시지가 없어도 로드 완료로 표시
+                messagesLoaded = true;
             }
         } else {
             console.error('세션 메시지 로드 실패:', response.status);
+            messagesLoaded = true; // 오류가 있어도 로드 시도 완료로 표시
         }
     } catch (error) {
         console.error('세션 메시지 로드 오류:', error);
+        messagesLoaded = true; // 오류가 있어도 로드 시도 완료로 표시
     }
 }
 
 // 세션 삭제
 async function deleteSession(sessionId) {
-    if (confirm('이 세션을 삭제하시겠습니까?')) {
+    if (confirm('이 대화를 삭제하시겠습니까?')) {
         try {
             const response = await fetch(`/api/sessions/${sessionId}`, {
                 method: 'DELETE'
@@ -602,11 +669,11 @@ async function deleteSession(sessionId) {
                 loadSessions();
             } else {
                 console.error('세션 삭제 실패:', response.status);
-                alert('세션 삭제에 실패했습니다.');
+                alert('대화 삭제에 실패했습니다.');
             }
         } catch (error) {
             console.error('세션 삭제 오류:', error);
-            alert('세션 삭제 중 오류가 발생했습니다.');
+            alert('대화 삭제 중 오류가 발생했습니다.');
         }
     }
 }
@@ -616,13 +683,13 @@ function clearChatMessages() {
     chatMessages.innerHTML = `
         <div class="message assistant-message">
             <div class="message-avatar">
-                <i class="fas fa-hospital"></i>
+                <img src="/static/assets/logo_white.png" alt="TeamMediChat" style="width: 35px; height: 35px; vertical-align: middle;">
             </div>
             <div class="message-content">
-                <div class="message-text">
-                    안녕하세요! 🏥 TeamMediChat입니다.<br>
-                    의약품에 대한 질문을 자유롭게 해주세요.
-                </div>
+                <div class="message-text">안녕하세요! 💬 TeamMediChat입니다.<br>
+의약품에 대해 궁금한 점이 있다면 편하게 질문해주세요.<br>
+주변 병원이나 약국을 찾고 싶으시다면 상단의 <b>약국 찾기</b> 버튼을 눌러주세요.<br><br>
+<small>※ TeamMediChat은 전문 의학 상담을 제공하지 않습니다. 증상에 따른 처방이나 정확한 진단이 필요하다면 의료 전문가와 상담하시길 권장드립니다.</small></div>
                 <div class="message-timestamp">지금</div>
             </div>
         </div>
@@ -726,7 +793,7 @@ function displayMessageWithImage(role, content, timestamp, imageData) {
     if (role === 'user') {
         avatar.innerHTML = '<i class="fas fa-user"></i>';
     } else {
-        avatar.innerHTML = '<i class="fas fa-hospital"></i>';
+        avatar.innerHTML = '<img src="/static/assets/logo_white.png" alt="TeamMediChat" style="width: 35px; height: 35px; vertical-align: middle;">';
     }
     
     const messageContent = document.createElement('div');
@@ -1017,11 +1084,7 @@ function selectAddress(addressResult) {
     
     // 맵에 마커 표시
     if (typeof displayMarker === 'function') {
-        const message = `<div style="padding:5px;">
-            <strong>선택한 위치</strong><br>
-            <small>${addressResult.address_name}</small>
-        </div>`;
-        displayMarker(position, message);
+        displayMarker(position);
     }
     
     // 사용자 위치 정보 업데이트

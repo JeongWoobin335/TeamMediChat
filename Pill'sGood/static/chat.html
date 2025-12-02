@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ko">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,49 +8,70 @@
     <link rel="stylesheet" href="/static/chat.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
+
 <body>
+    <!-- 스플래시 인트로 화면 -->
+    <div class="splash-screen" id="splashScreen">
+        <div class="splash-content">
+            <p class="splash-subtitle">의약품 정보를 정확하고 쉽게</p>
+            <h1 class="splash-title">
+                <img src="/static/assets/logo_color.png" alt="TeamMediChat" class="splash-logo">
+                TeamMediChat
+            </h1>
+        </div>
+    </div>
+
     <div class="chat-container">
         <!-- 사이드바 -->
         <div class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <h2><i class="fas fa-hospital"></i> TeamMediChat</h2>
+                <h2><img src="/static/assets/logo_color.png" alt="TeamMediChat" style="width: 35px; height: 35px; vertical-align: middle;"> TeamMediChat</h2>
                 <button class="sidebar-toggle" id="sidebarToggle">
                     <i class="fas fa-bars"></i>
                 </button>
             </div>
-            
+
             <div class="sidebar-content">
+
+                <!-- 도움말 -->
+                <div class="help-section">
+                    <h3>도움말</h3>
+                    <div class="help-content">
+                        <p><strong>💬 TeamMediChat:</strong></p>
+                        <p class="help-text-gray">생활 의약품과 약품 성분에 대한 정보를 제공하는 RAG 기반 서비스입니다.<br>
+                            약품 오남용을 방지하기 위해, 전문적인 판단이 필요한 질문에는 답변을 제공하지 않습니다.</p>
+                        <p><strong>💊 의약품 질문 예시:</strong></p>
+                        <ul>
+                            <li class="help-text-gray">타이레놀을 감기에 먹어도 되나요?</li>
+                            <li class="help-text-gray">아세트아미노펜이 뭔가요?</li>
+                        </ul>
+                        <p><strong>🔄 대화 기록:</strong></p>
+                        <p class="help-text-gray">이전 대화 내용을 바탕으로 이어서 답변해드려요.
+                            새로운 질문을 하고 싶다면 아래의 ‘새 대화’ 버튼을 눌러 새로운 대화를 시작해보세요.</p>
+                    </div>
+                </div>
+
+                <!-- 세션 목록 -->
+                <div class="sessions-section">
+                    <button class="sessions-toggle-btn" id="sessionsToggleBtn">
+                        <span>대화 기록</span>
+                        <i class="fas fa-chevron-down" id="sessionsToggleIcon"></i>
+                    </button>
+                    <div class="sessions-list" id="sessionsList" style="display: none;">
+                        <!-- 세션들이 여기에 동적으로 추가됨 -->
+                    </div>
+                </div>
+
                 <!-- 새 세션 버튼 -->
                 <div class="new-session-section">
                     <button class="new-session-btn" id="newSessionBtn">
                         <i class="fas fa-plus"></i> 새 대화
                     </button>
                 </div>
-                
-                <!-- 세션 목록 -->
-                <div class="sessions-section">
-                    <h3>대화 기록</h3>
-                    <div class="sessions-list" id="sessionsList">
-                        <!-- 세션들이 여기에 동적으로 추가됨 -->
-                    </div>
-                </div>
-                
-                <!-- 도움말 -->
-                <div class="help-section">
-                    <h3>도움말</h3>
-                    <div class="help-content">
-                        <p><strong>💊 의약품 질문 예시:</strong></p>
-                        <ul>
-                            <li>타이레놀을 감기에 먹어도 되나요?</li>
-                            <li>아세트아미노펜이 뭔가요?</li>
-                        </ul>
-                        <p><strong>🔄 대화 맥락:</strong></p>
-                        <p>이전 대화 내용을 기억하여 연속된 질문에 답변합니다.</p>
-                    </div>
-                </div>
+
             </div>
         </div>
-        
+
         <!-- 메인 채팅 영역 -->
         <div class="main-chat">
             <!-- 채팅 헤더 -->
@@ -58,7 +80,7 @@
                     <button class="sidebar-toggle-mobile" id="sidebarToggleMobile">
                         <i class="fas fa-bars"></i>
                     </button>
-                    <h1>TeamMediChat</h1>
+                    <h1><img src="/static/assets/logo_color.png" alt="TeamMediChat" style="width: 50px; height: 50px; vertical-align: middle;"> TeamMediChat</h1>
                 </div>
                 <div class="chat-header-right">
                     <button class="pharmacy-find-btn" id="pharmacyFindBtn" title="근처 약국 찾기">
@@ -70,24 +92,24 @@
                     </span>
                 </div>
             </div>
-            
+
             <!-- 채팅 메시지 영역 -->
             <div class="chat-messages" id="chatMessages">
                 <!-- 환영 메시지 -->
                 <div class="message assistant-message">
                     <div class="message-avatar">
-                        <i class="fas fa-hospital"></i>
+                        <img src="/static/assets/logo_white.png" alt="TeamMediChat" style="width: 35px; height: 35px; vertical-align: middle;">
                     </div>
                     <div class="message-content">
-                        <div class="message-text">
-                            안녕하세요! 🏥 TeamMediChat입니다.<br>
-                            의약품에 대한 질문을 자유롭게 해주세요.
-                        </div>
+                        <div class="message-text">안녕하세요! 💬 TeamMediChat입니다.<br>
+의약품에 대해 궁금한 점이 있다면 편하게 질문해주세요.<br>
+주변 병원이나 약국을 찾고 싶으시다면 상단의 <b>약국 찾기</b> 버튼을 눌러주세요.<br><br>
+<small>※ TeamMediChat은 전문 의학 상담을 제공하지 않습니다. 증상에 따른 처방이나 정확한 진단이 필요하다면 의료 전문가와 상담하시길 권장드립니다.</small></div>
                         <div class="message-timestamp">지금</div>
                     </div>
                 </div>
             </div>
-            
+
             <!-- 채팅 입력 영역 -->
             <div class="chat-input-container">
                 <!-- 이미지 업로드 영역 -->
@@ -99,18 +121,14 @@
                         </button>
                     </div>
                 </div>
-                
+
                 <div class="chat-input-wrapper">
                     <button id="imageUploadBtn" class="image-upload-btn" title="이미지 업로드">
                         <i class="fas fa-camera"></i>
                     </button>
                     <input type="file" id="imageInput" accept="image/*" style="display: none;">
-                    <textarea 
-                        id="chatInput" 
-                        placeholder="💬 질문을 입력하세요... (Shift+Enter로 줄바꿈)"
-                        rows="1"
-                        maxlength="2000"
-                    ></textarea>
+                    <textarea id="chatInput" placeholder="💬 질문을 입력하세요... (Shift+Enter로 줄바꿈)" rows="1"
+                        maxlength="2000"></textarea>
                     <button id="sendButton" class="send-button" disabled>
                         <i class="fas fa-paper-plane"></i>
                     </button>
@@ -124,7 +142,7 @@
             </div>
         </div>
     </div>
-    
+
     <!-- 로딩 오버레이 -->
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-spinner">
@@ -132,7 +150,7 @@
             <p>AI가 답변을 생성하고 있습니다...</p>
         </div>
     </div>
-    
+
     <!-- 오류 모달 -->
     <div class="error-modal" id="errorModal">
         <div class="error-content">
@@ -144,7 +162,7 @@
             <button class="error-close-btn" id="errorCloseBtn">확인</button>
         </div>
     </div>
-    
+
     <!-- 카카오 맵 모달 -->
     <div class="map-modal" id="mapModal">
         <div class="map-modal-content">
@@ -154,12 +172,13 @@
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            
+
             <!-- 주소 입력 섹션 -->
             <div class="address-input-section" id="addressInputSection">
                 <div class="address-input-header">
                     <h4><i class="fas fa-search-location"></i> 정확한 위치 설정</h4>
-                    <p>정확한 약국 정보를 위해 상세 주소를 입력해주세요</p>
+                    <p>현재 위치를 기반으로 주변 병의원과 약국 정보를 탐색합니다.
+                        위치가 정확하지 않다면, 상세 주소를 입력하여 정확한 위치를 설정해주세요.</p>
                 </div>
                 <div class="address-input-form">
                     <div class="address-input-group">
@@ -179,28 +198,30 @@
                     <div class="map_wrap">
                         <div id="map" style="width:100%;height:100%;position:relative;overflow:hidden;"></div>
                         <ul id="category">
-                            <li id="HP8" data-order="0"> 
+                            <li id="HP8" data-order="0">
                                 <span class="category_bg hospital"></span>
                                 병원
-                            </li>       
-                            <li id="PM9" data-order="1"> 
+                            </li>
+                            <li id="PM9" data-order="1">
                                 <span class="category_bg pharmacy"></span>
                                 약국
-                            </li>  
+                            </li>
                         </ul>
-                        
+
                         <!-- 위치 제어 버튼들 (제거됨) -->
-                        
+
                         <!-- 위치 설정 안내 메시지 (제거됨) -->
                     </div>
                 </div>
             </div>
         </div>
     </div>
-    
+
     <!-- 카카오 맵 API 직접 로드 (services 포함) -->
-    <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=bd76054a45b215e5cf1929d0e70dd061&libraries=services"></script>
+    <script type="text/javascript"
+        src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=bd76054a45b215e5cf1929d0e70dd061&libraries=services"></script>
     <!-- chat.js 로드 (test.js는 동적으로 로드됨) -->
     <script src="/static/chat.js"></script>
 </body>
+
 </html>

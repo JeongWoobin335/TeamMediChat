@@ -3,6 +3,11 @@
 from qa_state import QAState
 from retrievers import llm, excel_docs, find_products_by_ingredient
 from entity_classifier import classify_medicine_vs_ingredient, extract_target_from_query
+from config import PromptConfig
+from prompt_utils import (
+    get_role_definition, get_common_instructions, get_source_mention_examples,
+    get_medical_consultation_footer
+)
 from typing import Dict, List, Optional
 import re
 import json
@@ -13,39 +18,28 @@ from sns_node import search_youtube_videos, get_video_transcript, summarize_vide
 def search_youtube_for_followup(target: str, intent_type: str) -> List[Dict]:
     """연속 질문용 YouTube 검색 (의도에 맞게)"""
     try:
-        # 의도에 따라 검색어 생성 (기본 정보 + 부가 정보)
+        # 의도에 따라 검색어 생성 (단순하고 명료하게)
         if intent_type == "ingredient_info":
             search_queries = [
-                f"{target} 성분 설명",
-                f"{target} 작용기전",
-                f"{target} 효능 약사",
-                f"{target} 실제 효과",  # 부가 정보
-                f"{target} 복용 경험"   # 부가 정보
+                f"{target}",  # 성분명만
             ]
         elif intent_type == "usage_info":
             search_queries = [
-                f"{target} 사용법",
-                f"{target} 복용법",
-                f"{target} 복용 팁",     # 부가 정보
-                f"{target} 언제 먹나"   # 부가 정보
+                f"{target}",  # 약품명만
             ]
         elif intent_type == "side_effect":
             search_queries = [
-                f"{target} 부작용",
-                f"{target} 주의사항",
-                f"{target} 이상반응 경험"  # 부가 정보
+                f"{target} 부작용",  # 부작용은 명시적으로 검색
             ]
         else:
             search_queries = [
-                f"{target} 약사 설명",
-                f"{target} 전문가",
-                f"{target} 실사용 정보"  # 부가 정보
+                f"{target}",  # 기본은 단순하게
             ]
         
         collected_videos = []
         
-        # 각 검색어로 검색 (개수 증가)
-        for query in search_queries[:3]:  # 3개 검색어로 증가
+        # 각 검색어로 검색
+        for query in search_queries:
             try:
                 videos = search_youtube_videos(query, max_videos=4)
                 
@@ -104,12 +98,26 @@ def follow_up_question_node(state: QAState) -> QAState:
         # LLM 분석이 실패한 경우 기존 방식으로 fallback
         print("⚠️ LLM 분석 실패, 기존 방식으로 처리")
         
-        # 이전 대화에서 언급된 약품명 추출
-        medicine_name = extract_medicine_from_context(conversation_context)
+        # 디버깅: state에 저장된 값 확인
+        extracted_ingredient = state.get("extracted_ingredient_name")
+        extracted_medicine = state.get("extracted_medicine_name")
+        medicine_name_from_state = state.get("medicine_name")
+        print(f"🔍 state 확인 - extracted_ingredient_name: {extracted_ingredient}")
+        print(f"🔍 state 확인 - extracted_medicine_name: {extracted_medicine}")
+        print(f"🔍 state 확인 - medicine_name: {medicine_name_from_state}")
         
-        # 대화 맥락에서 찾지 못했다면 사용자 질문에서 직접 추출 시도
-        if not medicine_name:
-            medicine_name = extract_medicine_from_user_question(current_query)
+        # 먼저 state에 이미 저장된 약품명/성분명 확인 (question_refinement_node에서 추출한 값)
+        medicine_name = extracted_ingredient or extracted_medicine or medicine_name_from_state
+        
+        if medicine_name:
+            print(f"✅ state에서 약품명/성분명 발견: {medicine_name}")
+        else:
+            # 이전 대화에서 언급된 약품명 추출
+            medicine_name = extract_medicine_from_context(conversation_context)
+            
+            # 대화 맥락에서 찾지 못했다면 사용자 질문에서 직접 추출 시도
+            if not medicine_name:
+                medicine_name = extract_medicine_from_user_question(current_query)
         
         if not medicine_name:
             state["final_answer"] = "아, 어떤 약품에 대해 궁금하신지 명확하지 않네요! 약품명을 다시 말씀해 주시면 도움을 드릴게요!"
@@ -637,7 +645,7 @@ def generate_data_driven_answer(current_query: str, conversation_context: str, c
     has_translated_pubchem = "translated_pubchem_info" in collected_data
     
     # 데이터 기반 답변 생성 - 최적화 버전
-    answer_prompt = f"""당신은 친근한 약사입니다. 수집된 실제 데이터로 자연스러운 답변을 만드세요.
+    answer_prompt = f"""{get_role_definition("pharmacist_friendly")} 수집된 실제 데이터로 자연스러운 답변을 만드세요.
 
 ## 📋 대화 맥락
 **이전 대화:** {conversation_context[:500]}
@@ -647,21 +655,28 @@ def generate_data_driven_answer(current_query: str, conversation_context: str, c
 ## 📊 수집된 데이터
 {data_summary}
 
+**⚠️ 매우 중요: 데이터 수집 원칙**
+- 아래 수집된 데이터에는 Excel DB, PDF, PubChem, YouTube, 네이버 뉴스, 용량주의 성분, 연령대 금기, 일일 최대 투여량 등 다양한 소스의 정보가 포함되어 있습니다
+- **모든 데이터 소스를 빠짐없이 확인하세요**: 비슷한 정보라도 각 소스마다 고유한 세부사항이 있을 수 있으므로, 모든 소스를 반드시 확인하세요
+- **중복이라고 지나치지 말 것**: 같은 내용이라도 각 소스의 표현이나 추가 정보가 다를 수 있으므로, 모든 정보를 종합하세요
+- **단계별 확인**: 각 데이터 소스를 순서대로 확인하고, 발견한 모든 고유한 정보를 기록하세요
+
 ## 📝 답변 작성 가이드
 
 ### 핵심 원칙 (필수)
-1. **출처 숨기기**: "YouTube", "Excel DB", "PubChem" 같은 출처 언급 금지
-   - ✅ "전문가들에 따르면...", "알려진 바로는..."
-   - ❌ "YouTube에서 봤는데...", "DB에 따르면..."
+1. **출처 숨기기**: {PromptConfig.COMMON_INSTRUCTIONS['no_source_mention']}
+{get_source_mention_examples()}
 
 2. **자연스러운 통합**: 모든 정보를 하나의 통합 지식으로 표현
+   - **모든 데이터 소스의 정보를 빠짐없이 포함하세요**
+   - 각 소스의 고유한 정보를 모두 반영하세요
 
 3. **대화형 톤**: "좋은 질문이에요! 😊" 같은 친근한 시작
 
 ### 질문 유형별 답변 전략
 
 **🧪 성분 질문 (ingredient_info)일 때:**
-{'- 상세 설명 (500-700자)' if is_ingredient_question and has_translated_pubchem else ''}
+{'- 상세 설명 (' + str(PromptConfig.MIN_INGREDIENT_ANSWER_LENGTH) + '-' + str(PromptConfig.MAX_INGREDIENT_ANSWER_LENGTH) + '자)' if is_ingredient_question and has_translated_pubchem else ''}
 {'- 작용기전 구체적 설명 (어떻게/어디에 작용)' if is_ingredient_question and has_translated_pubchem else ''}
 {'- 약리학적 특성 (흡수, 대사, 반감기)' if is_ingredient_question and has_translated_pubchem else ''}
 {'- 의학 분류 언급 (ATC, MeSH)' if is_ingredient_question and has_translated_pubchem else ''}
@@ -669,8 +684,8 @@ def generate_data_driven_answer(current_query: str, conversation_context: str, c
 {'- 전문 용어는 (영문) 병기' if is_ingredient_question and has_translated_pubchem else ''}
 
 **일반 질문일 때:**
-{'- Enhanced RAG 있음: 종합 답변 (400-600자)' if not (is_ingredient_question and has_translated_pubchem) else ''}
-{'- 일반 정보만: 핵심 답변 (200-400자)' if not (is_ingredient_question and has_translated_pubchem) else ''}
+{'- Enhanced RAG 있음: 종합 답변 (' + str(PromptConfig.MIN_SECTION_LENGTH) + '-' + str(PromptConfig.MAX_SECTION_LENGTH) + '자)' if not (is_ingredient_question and has_translated_pubchem) else ''}
+{'- 일반 정보만: 핵심 답변 (' + str(PromptConfig.MIN_CONVERSATIONAL_LENGTH) + '-' + str(PromptConfig.MAX_CONVERSATIONAL_LENGTH) + '자)' if not (is_ingredient_question and has_translated_pubchem) else ''}
 {'- 새 약품: 작용기전 + 안전성 + 대안 포함' if not (is_ingredient_question and has_translated_pubchem) else ''}
 
 ### 답변 구조
@@ -793,23 +808,23 @@ def extract_medicine_from_user_question(user_context: str) -> Optional[str]:
     
     print(f"🔍 사용자 질문에서 약품명 추출 시도: {user_context}")
     
-    # 사용자 질문 패턴들
+    # 사용자 질문 패턴들 (더 정확한 패턴 우선)
     patterns = [
-        r'([가-힣]+정)의',  # 욱씬정의
-        r'([가-힣]+연고)의',  # 바스포연고의
-        r'([가-힣]+)의',  # 뇌선의
-        r'([가-힣]+정)',  # 욱씬정
-        r'([가-힣]+연고)',  # 바스포연고
-        r'([가-힣]+)',  # 일반적인 한글 약품명
+        r'([가-힣]{2,15})(?:정|연고|크림|젤|캡슐|시럽|액|주사)(?:은|는|이|가|을|를|의)',  # 약품명+형태+조사
+        r'([가-힣]{2,15})(?:정|연고|크림|젤|캡슐|시럽|액|주사)',  # 약품명+형태
+        r'([가-힣]{2,15})(?:은|는|이|가|을|를|의)',  # 약품명+조사
+        r'([가-힣]{2,15})(?:정|연고)',  # 약품명+정/연고
     ]
     
     for pattern in patterns:
         try:
             matches = re.findall(pattern, user_context)
             if matches:
-                medicine = matches[-1]
-                print(f"✅ 사용자 질문에서 약품명 추출: {medicine}")
-                return medicine
+                medicine = matches[0]  # 첫 번째 매칭 사용
+                # 너무 짧거나 일반적인 단어는 제외
+                if len(medicine) >= 2 and medicine not in ['무엇', '어떤', '이거', '그거', '저거', '무엇인가요', '무엇인가', '뭐야', '뭐예요']:
+                    print(f"✅ 사용자 질문에서 약품명 추출: {medicine}")
+                    return medicine
         except Exception as e:
             print(f"⚠️ 사용자 질문 패턴 매칭 오류: {e}")
             continue
@@ -825,7 +840,7 @@ def handle_usage_question(medicine_name: str, context: str) -> str:
         return f"아, '{medicine_name}'의 사용법 정보를 찾을 수 없네요! 다른 방법으로 도움을 드릴게요."
     
     prompt = f"""
-    당신은 친근하고 전문적인 약사입니다. 사용자가 이전에 {medicine_name}에 대해 물어봤고, 이제 사용법을 궁금해하고 있습니다.
+    {get_role_definition("pharmacist")} 사용자가 이전에 {medicine_name}에 대해 물어봤고, 이제 사용법을 궁금해하고 있습니다.
     
     **약품 정보:**
     - 제품명: {medicine_name}
@@ -913,7 +928,7 @@ def handle_specific_ingredient_question(classification: Dict) -> str:
     
     # LLM으로 자연스러운 답변 생성
     prompt = f"""
-당신은 친근하고 전문적인 약사입니다. 사용자가 "{ingredient_name}"이라는 **성분**에 대해 궁금해하고 있습니다.
+{get_role_definition("pharmacist")} 사용자가 "{ingredient_name}"이라는 **성분**에 대해 궁금해하고 있습니다.
 
 **PubChem 정보:**
 {summary if summary else "정보 수집 실패"}
@@ -934,7 +949,7 @@ def handle_specific_ingredient_question(classification: Dict) -> str:
    - 의학적 분류
 4. 이 성분이 포함된 제품들 안내 (있는 경우)
 5. 전문 용어는 괄호 안에 영어 원문도 함께
-6. 400-600자 정도의 상세한 길이
+6. {PromptConfig.MIN_SECTION_LENGTH}-{PromptConfig.MAX_SECTION_LENGTH}자 정도의 상세한 길이
 7. "더 궁금한 점이 있으면 언제든 물어보세요!" 같은 마무리
 
 **중요:** PubChem 정보를 최대한 활용하여 상세하게 설명하세요.
@@ -965,7 +980,7 @@ def handle_product_ingredient_question(product_name: str) -> str:
         return f"죄송해요! '{product_name}'의 성분 정보를 찾을 수 없네요."
     
     prompt = f"""
-당신은 친근하고 전문적인 약사입니다. 사용자가 {product_name}의 성분에 대해 궁금해하고 있습니다.
+{get_role_definition("pharmacist")} 사용자가 {product_name}의 성분에 대해 궁금해하고 있습니다.
 
 **약품 정보:**
 - 제품명: {product_name}
@@ -973,11 +988,11 @@ def handle_product_ingredient_question(product_name: str) -> str:
 - 효능: {medicine_info.get('효능', '정보 없음')}
 
 **답변 요구사항:**
-- 친근하고 대화하는 톤으로 답변
+- {PromptConfig.COMMON_INSTRUCTIONS['natural_tone']}
 - "아, 성분이 궁금하시군요!" 같은 자연스러운 반응으로 시작
 - 각 성분을 쉽게 설명하되 전문적인 정보도 포함
 - 성분별로 어떤 역할을 하는지 설명
-- 300-500자 정도의 적절한 길이
+- {PromptConfig.MIN_CONVERSATIONAL_LENGTH}-{PromptConfig.MAX_SECTION_LENGTH}자 정도의 적절한 길이
 - "더 궁금한 게 있으시면 언제든 물어보세요!" 같은 자연스러운 마무리
 
 자연스럽고 친근하게 답변해주세요!
@@ -1043,7 +1058,7 @@ def handle_mechanism_question(medicine_name: str, context: str) -> str:
         response = llm.invoke(prompt)
         return response.content.strip()
     except:
-        return f"**{medicine_name}**의 작용기전에 대한 자세한 정보는 의사나 약사와 상담하시기 바랍니다."
+        return f"**{medicine_name}**의 작용기전에 대한 자세한 정보는 {get_medical_consultation_footer('friendly').strip()}"
 
 def handle_precaution_question(medicine_name: str, context: str) -> str:
     """주의사항 질문 처리"""
@@ -1064,14 +1079,14 @@ def handle_precaution_question(medicine_name: str, context: str) -> str:
         response = llm.invoke(prompt)
         return response.content.strip()
     except:
-        return f"**{medicine_name}**의 주의사항에 대한 자세한 정보는 의사나 약사와 상담하시기 바랍니다."
+        return f"**{medicine_name}**의 주의사항에 대한 자세한 정보는 {get_medical_consultation_footer('friendly').strip()}"
 
 def handle_general_question(medicine_name: str, context: str, user_context: str) -> str:
     """일반적인 추가 질문 처리 - ChatGPT 수준의 자연스러운 대화"""
     medicine_info = find_medicine_info(medicine_name, excel_docs)
     
     prompt = f"""
-    당신은 친근하고 전문적인 약사입니다. 사용자가 이전에 {medicine_name}에 대해 물어봤고, 이제 추가 질문을 하고 있습니다.
+    {get_role_definition("pharmacist")} 사용자가 이전에 {medicine_name}에 대해 물어봤고, 이제 추가 질문을 하고 있습니다.
     
     **사용자 질문:** {user_context}
     
@@ -1083,7 +1098,7 @@ def handle_general_question(medicine_name: str, context: str, user_context: str)
     - 주성분: {medicine_info.get('주성분', '정보 없음')}
     
     **대화 스타일:**
-    - 친근하고 대화하는 톤으로 답변
+    - {PromptConfig.COMMON_INSTRUCTIONS['natural_tone']}
     - "아, 그거 궁금하시군요!", "좋은 질문이에요!" 같은 자연스러운 반응
     - 사용자의 질문에 정확하고 도움이 되는 답변
     - 필요시 추가 정보나 주의사항도 자연스럽게 언급
@@ -1092,7 +1107,7 @@ def handle_general_question(medicine_name: str, context: str, user_context: str)
     **답변 요구사항:**
     - 사용자의 질문에 직접적으로 답변
     - 전문적이지만 이해하기 쉽게 설명
-    - 자연스럽고 친근한 톤 유지
+    - {PromptConfig.COMMON_INSTRUCTIONS['natural_tone']}
     - 필요시 의료진 상담 권고
     
     자연스럽고 친근하게 답변해주세요!
@@ -1106,7 +1121,7 @@ def handle_general_question(medicine_name: str, context: str, user_context: str)
         return f"**{medicine_name}**에 대한 질문이 있으시면 구체적으로 말씀해 주세요. 더 궁금한 게 있으시면 언제든 물어보세요!"
 
 def find_medicine_info(medicine_name: str, all_docs: List) -> Dict:
-    """약품명으로 약품 정보를 찾아서 반환 - type 구분 지원"""
+    """약품명으로 약품 정보를 찾아서 반환 - type 구분 지원, PDF 링크 자동 다운로드"""
     medicine_info = {
         "제품명": medicine_name,
         "효능": "정보 없음",
@@ -1138,32 +1153,249 @@ def find_medicine_info(medicine_name: str, all_docs: List) -> Dict:
     else:
         print(f"✅ '{medicine_name}' 약품 정보 발견: {len(exact_matches)}개 청크")
     
-    # 약품 정보 수집 (type별로 구분)
+    # 약품 정보 수집 (여러 Excel 파일에서 병합) - medicine_usage_check_node와 동일한 로직
+    import os
+    import re
+    url_pattern = r'https?://[^\s]+'
+    
+    # 새 Excel 파일 우선순위 설정
+    new_excel_file = r"C:\Users\jung\Desktop\33\OpenData_ItemPermitDetail20251115.xls"
+    
+    # 모든 매칭된 문서를 파일별로 그룹화
+    docs_by_file = {}
     for doc in exact_matches:
-        content = doc.page_content
-        doc_type = doc.metadata.get("type", "")
+        excel_file = doc.metadata.get("excel_file")
+        if excel_file:
+            if excel_file not in docs_by_file:
+                docs_by_file[excel_file] = []
+            docs_by_file[excel_file].append(doc)
+    
+    # 새 Excel 파일이 있으면 우선순위로 설정
+    file_priority = []
+    if new_excel_file in docs_by_file:
+        file_priority.append(new_excel_file)
+    for file in docs_by_file.keys():
+        if file != new_excel_file:
+            file_priority.append(file)
+    
+    print(f"📂 약품 정보 출처 파일: {len(file_priority)}개 파일에서 발견")
+    for file in file_priority:
+        print(f"  - {os.path.basename(file)} ({len(docs_by_file[file])}개 청크)")
+    
+    # 모든 Excel 파일에서 정보 수집 (파일별로 그룹화)
+    excel_file = None
+    excel_row_index = None
+    
+    # 각 파일별로 정보를 수집하여 리스트로 저장
+    all_efficacy_info = []  # [(파일명, 효능정보), ...]
+    all_side_effects_info = []  # [(파일명, 부작용정보), ...]
+    all_usage_info = []  # [(파일명, 사용법정보), ...]
+    
+    for file in file_priority:
+        file_name = os.path.basename(file)
+        file_efficacy = None
+        file_side_effects = None
+        file_usage = None
         
-        print(f"🔍 청크 타입: {doc_type}, 내용 길이: {len(content)}")
-        
-        # 효능과 부작용은 main 타입에서 추출
-        if doc_type == "main" or doc_type == "":
-            efficacy = extract_field_from_doc(content, "효능")
-            side_effects = extract_field_from_doc(content, "부작용")
-            main_ingredient = doc.metadata.get("주성분", "정보 없음")
+        for doc in docs_by_file[file]:
+            content = doc.page_content
+            doc_type = doc.metadata.get("type", "")
             
-            if efficacy != "정보 없음":
-                medicine_info["효능"] = efficacy
-            if side_effects != "정보 없음":
-                medicine_info["부작용"] = side_effects
-            if main_ingredient != "정보 없음":
-                medicine_info["주성분"] = main_ingredient
+            # Excel 파일 정보 저장 (우선순위가 높은 파일에서)
+            if not excel_file:
+                excel_file = doc.metadata.get("excel_file")
+                excel_row_index = doc.metadata.get("excel_row_index")
+            
+            # 효능과 부작용은 main 타입에서 추출
+            if doc_type == "main" or doc_type == "":
+                efficacy = extract_field_from_doc(content, "효능")
+                side_effects = extract_field_from_doc(content, "부작용")
+                main_ingredient = doc.metadata.get("주성분", "정보 없음")
+                
+                # 주성분은 첫 번째 파일에서만 저장
+                if not medicine_info.get("주성분") or medicine_info["주성분"] == "정보 없음":
+                    if main_ingredient != "정보 없음":
+                        medicine_info["주성분"] = main_ingredient
+                
+                # URL이 아닌 경우에만 수집
+                if efficacy != "정보 없음" and not re.search(url_pattern, str(efficacy)):
+                    if file_efficacy is None:
+                        file_efficacy = efficacy
+                    else:
+                        # 같은 파일 내에서 여러 청크가 있으면 더 긴 것을 선택
+                        if len(efficacy) > len(file_efficacy):
+                            file_efficacy = efficacy
+                
+                if side_effects != "정보 없음" and not re.search(url_pattern, str(side_effects)):
+                    if file_side_effects is None:
+                        file_side_effects = side_effects
+                    else:
+                        if len(side_effects) > len(file_side_effects):
+                            file_side_effects = side_effects
+            
+            # 사용법은 usage 타입에서 추출
+            if doc_type == "usage":
+                usage = extract_field_from_doc(content, "사용법")
+                if usage != "정보 없음" and not re.search(url_pattern, str(usage)):
+                    if file_usage is None:
+                        file_usage = usage
+                    else:
+                        if len(usage) > len(file_usage):
+                            file_usage = usage
         
-        # 사용법은 usage 타입에서 추출
-        if doc_type == "usage":
-            usage = extract_field_from_doc(content, "사용법")
-            print(f"🔍 사용법 추출 결과: {usage[:100] if usage != '정보 없음' else usage}")
-            if usage != "정보 없음":
-                medicine_info["사용법"] = usage
+        # 파일별로 수집한 정보를 리스트에 추가
+        if file_efficacy:
+            all_efficacy_info.append((file_name, file_efficacy))
+            print(f"📋 {file_name}에서 효능 정보 수집: {len(file_efficacy)}자")
+        if file_side_effects:
+            all_side_effects_info.append((file_name, file_side_effects))
+            print(f"📋 {file_name}에서 부작용 정보 수집: {len(file_side_effects)}자")
+        if file_usage:
+            all_usage_info.append((file_name, file_usage))
+            print(f"📋 {file_name}에서 사용법 정보 수집: {len(file_usage)}자")
+    
+    # 여러 소스의 정보를 LLM으로 병합
+    from medicine_usage_check_node import merge_multiple_sources_with_llm
+    
+    if len(all_efficacy_info) > 1:
+        print(f"🔄 {len(all_efficacy_info)}개 소스의 효능 정보 병합 중...")
+        merged_efficacy = merge_multiple_sources_with_llm(all_efficacy_info, "효능")
+        medicine_info["효능"] = merged_efficacy
+    elif len(all_efficacy_info) == 1:
+        medicine_info["효능"] = all_efficacy_info[0][1]
+    
+    if len(all_side_effects_info) > 1:
+        print(f"🔄 {len(all_side_effects_info)}개 소스의 부작용 정보 병합 중...")
+        merged_side_effects = merge_multiple_sources_with_llm(all_side_effects_info, "부작용")
+        medicine_info["부작용"] = merged_side_effects
+    elif len(all_side_effects_info) == 1:
+        medicine_info["부작용"] = all_side_effects_info[0][1]
+    
+    if len(all_usage_info) > 1:
+        print(f"🔄 {len(all_usage_info)}개 소스의 사용법 정보 병합 중...")
+        merged_usage = merge_multiple_sources_with_llm(all_usage_info, "사용법")
+        medicine_info["사용법"] = merged_usage
+    elif len(all_usage_info) == 1:
+        medicine_info["사용법"] = all_usage_info[0][1]
+    
+    # PDF 링크 확인 및 다운로드 (모든 파일에서 수집하여 병합)
+    from pdf_link_extractor import enrich_excel_row_with_pdf_content
+    from retrievers import file_column_mappings, default_columns
+    
+    # 모든 파일에서 PDF 정보 수집
+    all_pdf_efficacy = []
+    all_pdf_side_effects = []
+    all_pdf_usage = []
+    
+    for file in file_priority:
+        # 해당 파일의 문서에서 excel_row_index 찾기
+        file_row_index = None
+        for doc in docs_by_file[file]:
+            if doc.metadata.get("excel_file") == file:
+                file_row_index = doc.metadata.get("excel_row_index")
+                if file_row_index is not None:
+                    break
+        
+        if file_row_index is None:
+            continue
+        
+        print(f"📥 PDF 다운로드 시도: {os.path.basename(file)}, 행 {file_row_index}")
+        try:
+            # 파일별 컬럼 매핑 확인
+            if file in file_column_mappings:
+                col_mapping = file_column_mappings[file]
+            else:
+                col_mapping = default_columns
+            
+            pdf_column_mapping = {
+                '효능': col_mapping['효능'],
+                '복용법': col_mapping['사용법'],
+                '주의사항': col_mapping['부작용']
+            }
+            
+            # 효능, 부작용, 사용법이 URL인지 확인하고 PDF 다운로드
+            # 연속 질문일 때는 요약을 덜 심하게 하여 더 상세한 내용 제공
+            pdf_content = enrich_excel_row_with_pdf_content(
+                file, file_row_index, ['효능', '주의사항', '복용법'], pdf_column_mapping,
+                summarize=True,  # 요약은 하되
+                max_length=5000  # 연속 질문일 때는 더 긴 내용 제공 (기본값 2000자 → 5000자)
+            )
+            
+            print(f"📋 PDF 내용 확인: {list(pdf_content.keys())}")
+            for key, value in pdf_content.items():
+                if value:
+                    print(f"  - {key}: {len(str(value))}자 - {str(value)[:100]}...")
+                    # PDF 정보를 리스트에 추가
+                    file_name = os.path.basename(file)
+                    if key == '효능' and value:
+                        all_pdf_efficacy.append((file_name, value))
+                    elif key == '주의사항' and value:
+                        all_pdf_side_effects.append((file_name, value))
+                    elif key == '복용법' and value:
+                        all_pdf_usage.append((file_name, value))
+                else:
+                    print(f"  - {key}: None")
+        
+        except Exception as e:
+            print(f"⚠️ {os.path.basename(file)} PDF 다운로드 실패 (계속 진행): {e}")
+    
+    # PDF 정보를 기존 Excel 정보와 병합
+    if all_pdf_efficacy:
+        current_efficacy = medicine_info.get("효능", "정보 없음")
+        if current_efficacy != "정보 없음":
+            # Excel 정보와 PDF 정보를 모두 병합
+            all_efficacy_sources = all_efficacy_info + all_pdf_efficacy
+            if len(all_efficacy_sources) > 1:
+                print(f"🔄 Excel + PDF 효능 정보 병합 중... ({len(all_efficacy_sources)}개 소스)")
+                merged_efficacy = merge_multiple_sources_with_llm(all_efficacy_sources, "효능")
+                medicine_info["효능"] = merged_efficacy
+            else:
+                medicine_info["효능"] = all_efficacy_sources[0][1]
+        else:
+            # Excel 정보가 없으면 PDF 정보만 사용
+            if len(all_pdf_efficacy) > 1:
+                merged_efficacy = merge_multiple_sources_with_llm(all_pdf_efficacy, "효능")
+                medicine_info["효능"] = merged_efficacy
+            elif len(all_pdf_efficacy) == 1:
+                medicine_info["효능"] = all_pdf_efficacy[0][1]
+    
+    if all_pdf_side_effects:
+        current_side_effects = medicine_info.get("부작용", "정보 없음")
+        if current_side_effects != "정보 없음":
+            # Excel 정보와 PDF 정보를 모두 병합
+            all_side_effects_sources = all_side_effects_info + all_pdf_side_effects
+            if len(all_side_effects_sources) > 1:
+                print(f"🔄 Excel + PDF 부작용 정보 병합 중... ({len(all_side_effects_sources)}개 소스)")
+                merged_side_effects = merge_multiple_sources_with_llm(all_side_effects_sources, "부작용")
+                medicine_info["부작용"] = merged_side_effects
+            else:
+                medicine_info["부작용"] = all_side_effects_sources[0][1]
+        else:
+            # Excel 정보가 없으면 PDF 정보만 사용
+            if len(all_pdf_side_effects) > 1:
+                merged_side_effects = merge_multiple_sources_with_llm(all_pdf_side_effects, "부작용")
+                medicine_info["부작용"] = merged_side_effects
+            elif len(all_pdf_side_effects) == 1:
+                medicine_info["부작용"] = all_pdf_side_effects[0][1]
+    
+    if all_pdf_usage:
+        current_usage = medicine_info.get("사용법", "정보 없음")
+        if current_usage != "정보 없음":
+            # Excel 정보와 PDF 정보를 모두 병합
+            all_usage_sources = all_usage_info + all_pdf_usage
+            if len(all_usage_sources) > 1:
+                print(f"🔄 Excel + PDF 사용법 정보 병합 중... ({len(all_usage_sources)}개 소스)")
+                merged_usage = merge_multiple_sources_with_llm(all_usage_sources, "사용법")
+                medicine_info["사용법"] = merged_usage
+            else:
+                medicine_info["사용법"] = all_usage_sources[0][1]
+        else:
+            # Excel 정보가 없으면 PDF 정보만 사용
+            if len(all_pdf_usage) > 1:
+                merged_usage = merge_multiple_sources_with_llm(all_pdf_usage, "사용법")
+                medicine_info["사용법"] = merged_usage
+            elif len(all_pdf_usage) == 1:
+                medicine_info["사용법"] = all_pdf_usage[0][1]
     
     return medicine_info
 
@@ -1564,7 +1796,7 @@ def generate_fallback_alternative_analysis(medicine_name: str, alternative_medic
         response += f"- 효능: {alt['efficacy']}\n"
         response += f"- 유사도: {alt['similarity_score']:.2f}\n\n"
     
-    response += "⚠️ **중요**: 정확한 진단과 처방을 위해서는 의사나 약사와 상담하시기 바랍니다."
+    response += get_medical_consultation_footer("warning")
     
     return response
 

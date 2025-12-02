@@ -29,15 +29,7 @@ def analyze_response_by_keywords(response: str) -> dict:
     response_lower = response.lower()
     
     # 라우팅 결정을 위한 키워드 매칭
-    if any(word in response_lower for word in ["추천", "추천해", "어떤 약", "뭐 먹으면"]):
-        return {
-            "routing_decision": "recommend",
-            "confidence": "medium",
-            "reasoning": "키워드 기반 추천 라우팅",
-            "user_intent": "약품 추천 요청",
-            "context_relevance": "추천 관련 질문"
-        }
-    elif any(word in response_lower for word in ["부작용", "효능", "효과", "정보"]):
+    if any(word in response_lower for word in ["부작용", "효능", "효과", "정보"]):
         return {
             "routing_decision": "excel_search",
             "confidence": "medium",
@@ -118,13 +110,10 @@ def quick_pattern_analysis(query: str, category: str) -> dict:
     
     # 명확한 패턴들 (하드코딩)
     patterns = {
-        "recommend": [
-            "추천", "추천해", "추천해줘", "어떤 약", "뭐 먹으면", "복용법", "용법",
-            "처방", "약사", "의사", "상담", "조언", "도움", "어떻게", "어떤 게"
-        ],
         "excel_search": [
             "부작용", "효능", "효과", "성분", "가격", "제조사", "보험", "급여",
-            "복용", "투여", "섭취", "먹는법", "약물", "약품", "정보", "알려줘"
+            "복용", "투여", "섭취", "먹는법", "약물", "약품", "정보", "알려줘",
+            "사용", "복용법", "용법", "어떻게"
         ],
         "pdf_search": [
             "연구", "논문", "임상", "시험", "데이터", "통계", "분석", "결과",
@@ -152,7 +141,6 @@ def quick_pattern_analysis(query: str, category: str) -> dict:
     # 카테고리 기반 기본 라우팅
     if category:
         category_mapping = {
-            "추천": "recommend",
             "정보": "excel_search", 
             "연구": "pdf_search",
             "최신": "external_search"
@@ -203,10 +191,9 @@ def llm_context_analysis(query: str, context: str, user_context: str, category: 
 {category if category else "미분류"}
 
 **처리 경로 옵션:**
-1. "recommend" - 약품 추천, 복용법, 상담이 필요한 경우
-2. "excel_search" - 약품 정보, 부작용, 효능 등 기본 정보가 필요한 경우  
-3. "pdf_search" - 연구 자료, 임상 데이터, 상세 분석이 필요한 경우
-4. "external_search" - 최신 정보, 신약, 외부 소식이 필요한 경우
+1. "excel_search" - 약품 정보, 부작용, 효능 등 기본 정보가 필요한 경우  
+2. "pdf_search" - 연구 자료, 임상 데이터, 상세 분석이 필요한 경우
+3. "external_search" - 최신 정보, 신약, 외부 소식이 필요한 경우
 
 **분석 기준:**
 - 사용자의 구체적인 의도 파악
@@ -265,15 +252,7 @@ def llm_fallback_analysis(query: str, context: str, user_context: str, category:
     # 간단한 키워드 기반 분석
     query_lower = query.lower()
     
-    if any(word in query_lower for word in ["추천", "어떤", "뭐", "도움", "어떻게"]):
-        return {
-            "route": "recommend",
-            "confidence": "low",
-            "method": "fallback",
-            "routing_decision": "recommend",
-            "reasoning": "폴백 키워드 분석"
-        }
-    elif any(word in query_lower for word in ["부작용", "효능", "정보", "알려줘"]):
+    if any(word in query_lower for word in ["부작용", "효능", "정보", "알려줘"]):
         return {
             "route": "excel_search",
             "confidence": "low",

@@ -20,8 +20,10 @@ class CacheManager:
         self.search_cache_dir = self.cache_dir / "search"
         self.embedding_cache_dir = self.cache_dir / "embeddings"
         self.matching_cache_dir = self.cache_dir / "matching"  # LLM 매칭 결과 캐시
+        self.pdf_cache_dir = self.cache_dir / "pdfs"  # PDF 파일 캐시
+        self.llm_response_cache_dir = self.cache_dir / "llm_responses"  # LLM 응답 캐시
         
-        for dir_path in [self.vector_cache_dir, self.search_cache_dir, self.embedding_cache_dir, self.matching_cache_dir]:
+        for dir_path in [self.vector_cache_dir, self.search_cache_dir, self.embedding_cache_dir, self.matching_cache_dir, self.pdf_cache_dir, self.llm_response_cache_dir]:
             dir_path.mkdir(exist_ok=True)
     
     def _get_file_hash(self, file_path: str) -> str:
@@ -254,6 +256,27 @@ class CacheManager:
         
         return None
     
+    def save_pdf_cache(self, cache_key: str, pdf_path: str):
+        """PDF 파일 경로 캐싱 (파일 자체를 복사하여 저장)"""
+        import shutil
+        cache_file = self.pdf_cache_dir / f"{cache_key}.pdf"
+        
+        try:
+            if os.path.exists(pdf_path):
+                shutil.copy2(pdf_path, cache_file)
+                print(f"💾 PDF 캐시 저장됨: {cache_key}")
+        except Exception as e:
+            print(f"❌ PDF 캐시 저장 실패: {e}")
+    
+    def get_pdf_cache(self, cache_key: str) -> Optional[str]:
+        """PDF 파일 캐시 경로 반환"""
+        cache_file = self.pdf_cache_dir / f"{cache_key}.pdf"
+        
+        if cache_file.exists():
+            return str(cache_file)
+        
+        return None
+    
     def clear_expired_cache(self, max_age_days: int = 7):
         """만료된 캐시 정리"""
         cutoff_time = datetime.now() - timedelta(days=max_age_days)
@@ -266,7 +289,7 @@ class CacheManager:
     
     def clear_all_cache(self):
         """모든 캐시 삭제"""
-        for cache_dir in [self.vector_cache_dir, self.search_cache_dir, self.embedding_cache_dir, self.matching_cache_dir]:
+        for cache_dir in [self.vector_cache_dir, self.search_cache_dir, self.embedding_cache_dir, self.matching_cache_dir, self.llm_response_cache_dir]:
             for cache_file in cache_dir.glob("*"):
                 if cache_file.is_file():
                     cache_file.unlink()
@@ -292,6 +315,39 @@ class CacheManager:
         else:
             print(f"📝 {source_type} 문서 캐시가 이미 없음")
     
+    def get_llm_response_cache_key(self, prompt: str, cache_type: str = "general") -> str:
+        """LLM 응답 캐시 키 생성"""
+        prompt_hash = hashlib.md5(prompt.encode()).hexdigest()
+        return f"llm_{cache_type}_{prompt_hash}"
+    
+    def get_llm_response_cache(self, prompt: str, cache_type: str = "general") -> Optional[str]:
+        """LLM 응답 캐시 조회"""
+        cache_key = self.get_llm_response_cache_key(prompt, cache_type)
+        cache_file = self.llm_response_cache_dir / f"{cache_key}.txt"
+        
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    response = f.read()
+                print(f"📂 LLM 응답 캐시 히트: {cache_type} ({len(prompt)}자 프롬프트)")
+                return response
+            except Exception as e:
+                print(f"❌ LLM 응답 캐시 로드 실패: {e}")
+        
+        return None
+    
+    def save_llm_response_cache(self, prompt: str, response: str, cache_type: str = "general"):
+        """LLM 응답 캐싱"""
+        cache_key = self.get_llm_response_cache_key(prompt, cache_type)
+        cache_file = self.llm_response_cache_dir / f"{cache_key}.txt"
+        
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                f.write(response)
+            print(f"💾 LLM 응답 캐시 저장됨: {cache_type} ({len(response)}자)")
+        except Exception as e:
+            print(f"❌ LLM 응답 캐시 저장 실패: {e}")
+    
     def get_cache_stats(self) -> Dict[str, Any]:
         """캐시 통계 정보"""
         # 벡터 캐시는 디렉토리로 저장되므로 디렉토리 개수로 계산
@@ -302,11 +358,12 @@ class CacheManager:
             "search_cache_count": len(list(self.search_cache_dir.glob("*.pkl"))),
             "embedding_cache_count": len(list(self.embedding_cache_dir.glob("*.pkl"))),
             "matching_cache_count": len(list(self.matching_cache_dir.glob("*.pkl"))),
+            "llm_response_cache_count": len(list(self.llm_response_cache_dir.glob("*.txt"))),
             "total_cache_size_mb": 0
         }
         
         total_size = 0
-        for cache_dir in [self.vector_cache_dir, self.search_cache_dir, self.embedding_cache_dir, self.matching_cache_dir]:
+        for cache_dir in [self.vector_cache_dir, self.search_cache_dir, self.embedding_cache_dir, self.matching_cache_dir, self.llm_response_cache_dir]:
             for cache_file in cache_dir.glob("*"):
                 if cache_file.is_file():
                     total_size += cache_file.stat().st_size
@@ -325,5 +382,6 @@ def print_cache_stats():
     print(f"  - 검색 캐시: {stats['search_cache_count']}개")
     print(f"  - 임베딩 캐시: {stats['embedding_cache_count']}개")
     print(f"  - 매칭 캐시: {stats['matching_cache_count']}개")
+    print(f"  - LLM 응답 캐시: {stats['llm_response_cache_count']}개")
     print(f"  - 총 캐시 크기: {stats['total_cache_size_mb']}MB")
     print() 

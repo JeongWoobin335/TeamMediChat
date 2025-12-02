@@ -112,7 +112,7 @@ function showCurrentLocation() {
                     </div>`; // 인포윈도우에 표시될 내용입니다
                 
                 // 마커와 인포윈도우를 표시합니다
-                displayMarker(locPosition, message);
+                displayMarker(locPosition);
                 
                 // 스마트 위치 설정 로직
                 if (accuracy <= 100) {
@@ -323,7 +323,7 @@ function changeCategoryClass(el) {
 
 
 // 지도에 마커와 인포윈도우를 표시하는 함수입니다 (개선된 버전)
-function displayMarker(locPosition, message) {
+function displayMarker(locPosition) {
     // 기존 현재 위치 마커가 있으면 제거
     if (currentLocationMarker) {
         currentLocationMarker.setMap(null);
@@ -333,22 +333,7 @@ function displayMarker(locPosition, message) {
     currentLocationMarker = new kakao.maps.Marker({  
         map: map, 
         position: locPosition
-    }); 
-    
-    var iwContent = message, // 인포윈도우에 표시할 내용
-        iwRemoveable = true;
-
-    // 인포윈도우를 생성합니다
-    var infowindow = new kakao.maps.InfoWindow({
-        content : iwContent,
-        removable : iwRemoveable
     });
-    
-    // 인포윈도우를 마커위에 표시합니다 
-    infowindow.open(map, currentLocationMarker);
-    
-    // 지도 중심좌표를 접속위치로 변경합니다
-    map.setCenter(locPosition);
 }
 
 // 위치 설정 안내 함수 제거됨 (주소 입력 우선 모드)
@@ -438,7 +423,7 @@ function setupMapClickEvent() {
         var latlng = mouseEvent.latLng;
         
         // 클릭한 위치에 마커 표시
-        displayMarker(latlng, '<div style="padding:5px;"><strong>선택한 위치</strong></div>');
+        displayMarker(latlng);
         
         // 위치 설정 안내 표시
         // 위치 설정 안내 제거됨 (주소 입력 우선 모드)

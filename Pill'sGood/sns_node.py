@@ -79,24 +79,79 @@ def get_video_transcript(video_id: str) -> str:
     """유튜브 영상의 자막/내용 가져오기"""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
+        from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
         
-        # 한국어 자막 우선, 없으면 영어 자막
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ko', 'en'])
+        # YouTubeTranscriptApi 인스턴스 생성
+        ytt_api = YouTubeTranscriptApi()
         
-        if transcript_list:
-            # 자막 텍스트를 하나로 합치기
-            full_transcript = ""
-            for transcript in transcript_list:
-                full_transcript += transcript['text'] + " "
+        # 방법 1: fetch 메서드로 직접 가져오기 (가장 간단한 방법)
+        try:
+            transcript = ytt_api.fetch(video_id, languages=['ko', 'en'])
             
-            print(f"✅ 영상 {video_id} 자막 추출 성공: {len(full_transcript)}자")
-            return full_transcript.strip()
-        else:
-            print(f"⚠️ 영상 {video_id} 자막이 없습니다")
+            if transcript:
+                # 자막 텍스트를 하나로 합치기
+                # transcript는 FetchedTranscript 객체이고, 각 item은 FetchedTranscriptSnippet 객체
+                full_transcript = ""
+                for snippet in transcript:
+                    # FetchedTranscriptSnippet 객체는 text 속성을 가짐
+                    if hasattr(snippet, 'text'):
+                        full_transcript += snippet.text + " "
+                    elif isinstance(snippet, dict) and 'text' in snippet:
+                        full_transcript += snippet['text'] + " "
+                    elif isinstance(snippet, str):
+                        full_transcript += snippet + " "
+                
+                if full_transcript.strip():
+                    print(f"✅ 영상 {video_id} 자막 추출 성공: {len(full_transcript)}자")
+                    return full_transcript.strip()
+                else:
+                    return ""
+        except (TranscriptsDisabled, NoTranscriptFound, VideoUnavailable) as e:
+            # 자막이 비활성화되었거나 없는 경우
+            print(f"⚠️ 영상 {video_id} 자막 없음: {type(e).__name__}")
             return ""
+        except Exception as e1:
+            # 다른 예외 발생 시 list 메서드로 시도
+            print(f"⚠️ fetch 실패, list 메서드로 시도: {type(e1).__name__}")
+            
+            # 방법 2: list 메서드로 자막 목록 가져온 후 선택
+            try:
+                transcript_list = ytt_api.list(video_id)
+                
+                # 한국어 자막 우선, 없으면 영어 자막
+                transcript = transcript_list.find_transcript(['ko', 'en'])
+                transcript_data = transcript.fetch()
+                
+                if transcript_data:
+                    # 자막 텍스트를 하나로 합치기
+                    # transcript_data는 FetchedTranscript 객체
+                    full_transcript = ""
+                    for snippet in transcript_data:
+                        # FetchedTranscriptSnippet 객체는 text 속성을 가짐
+                        if hasattr(snippet, 'text'):
+                            full_transcript += snippet.text + " "
+                        elif isinstance(snippet, dict) and 'text' in snippet:
+                            full_transcript += snippet['text'] + " "
+                        elif isinstance(snippet, str):
+                            full_transcript += snippet + " "
+                    
+                    if full_transcript.strip():
+                        print(f"✅ 영상 {video_id} 자막 추출 성공 (list): {len(full_transcript)}자")
+                        return full_transcript.strip()
+                    else:
+                        return ""
+            except (TranscriptsDisabled, NoTranscriptFound, VideoUnavailable) as e2:
+                print(f"⚠️ 영상 {video_id} 자막 없음 (list): {type(e2).__name__}")
+                return ""
+            except Exception as e2:
+                print(f"❌ 자막 가져오기 실패 (list): {type(e2).__name__}: {e2}")
+                return ""
+        
+        print(f"⚠️ 영상 {video_id} 자막이 없습니다")
+        return ""
             
     except Exception as e:
-        print(f"❌ 자막 가져오기 실패: {e}")
+        print(f"❌ 자막 가져오기 실패: {type(e).__name__}: {e}")
         return ""
 
 def summarize_video_content(content: str, max_length: int = 500) -> str:

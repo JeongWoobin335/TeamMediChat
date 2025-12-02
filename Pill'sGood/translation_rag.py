@@ -14,6 +14,105 @@ class TranslationRAG:
     
     def __init__(self):
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0.1)
+        # 🚀 성능 최적화: 자주 쓰는 성분명 사전 구축 (LLM 호출 없이 즉시 반환)
+        self.korean_to_english_dict = {
+            "아세트아미노펜": "acetaminophen",
+            "이부프로펜": "ibuprofen",
+            "나프록센": "naproxen",
+            "디클로페낙": "diclofenac",
+            "케토프로펜": "ketoprofen",
+            "멜록시캠": "meloxicam",
+            "셀레콕시브": "celecoxib",
+            "카페인": "caffeine",
+            "카페인무수물": "anhydrous caffeine",
+            "푸르설티아민": "fursultiamine",
+            "푸르설티아민염산염": "fursultiamine hydrochloride",
+            "디펜히드라민": "diphenhydramine",
+            "클로르페니라민": "chlorpheniramine",
+            "로라타딘": "loratadine",
+            "세티리진": "cetirizine",
+            "펙소페나딘": "fexofenadine",
+            "덱스부프로펜": "dexibuprofen",
+            "트라마돌": "tramadol",
+            "코데인": "codeine",
+            "옥시코돈": "oxycodone",
+            "모르핀": "morphine",
+            "프레드니솔론": "prednisolone",
+            "덱사메타손": "dexamethasone",
+            "하이드로코르티손": "hydrocortisone",
+            "베타메타손": "betamethasone",
+            "아목시실린": "amoxicillin",
+            "아목시실린트리하이드레이트": "amoxicillin trihydrate",
+            "세팔렉신": "cephalexin",
+            "아지트로마이신": "azithromycin",
+            "클라리트로마이신": "clarithromycin",
+            "도시사이클린": "doxycycline",
+            "테트라사이클린": "tetracycline",
+            "시프로플록사신": "ciprofloxacin",
+            "레보플록사신": "levofloxacin",
+            "메트로니다졸": "metronidazole",
+            "클린다마이신": "clindamycin",
+            "옥시부티닌": "oxybutynin",
+            "톨테로딘": "tolterodine",
+            "솔리페나신": "solifenacin",
+            "다리페나신": "darifenacin",
+            "옴페프라졸": "omeprazole",
+            "란소프라졸": "lansoprazole",
+            "에소메프라졸": "esomeprazole",
+            "판토프라졸": "pantoprazole",
+            "라베프라졸": "rabeprazole",
+            "란티딘": "ranitidine",
+            "파모티딘": "famotidine",
+            "시메티딘": "cimetidine",
+            "니자티딘": "nizatidine",
+            "도메페리돈": "domperidone",
+            "메토클로프라미드": "metoclopramide",
+            "시사프리드": "cisapride",
+            "모사프리드": "mosapride",
+            "비스무트": "bismuth",
+            "수크랄페이트": "sucralfate",
+            "알긴산나트륨": "sodium alginate",
+            "알마겔": "aluminum hydroxide",
+            "마그네슘하이드록사이드": "magnesium hydroxide",
+            "시메티콘": "simethicone",
+            "디메티콘": "dimethicone",
+            "락툴로스": "lactulose",
+            "비사코딜": "bisacodyl",
+            "세나": "senna",
+            "프로바이오틱스": "probiotics",
+            "락토바실러스": "lactobacillus",
+            "비피도박테리움": "bifidobacterium",
+            "파라세타몰": "paracetamol",  # 아세트아미노펜의 다른 이름
+            "아스피린": "aspirin",
+            "살리실산": "salicylic acid",
+            "살리실아마이드": "salicylamide",
+            "인도메타신": "indomethacin",
+            "피로시캠": "piroxicam",
+            "테노시캠": "tenoxicam",
+            "로페콕시브": "rofecoxib",
+            "발데콕시브": "valdecoxib",
+            "에토리콕시브": "etoricoxib",
+            "파레콕시브": "parecoxib",
+            "부프로펜": "buprofen",
+            "플루비프로펜": "flurbiprofen",
+            "옥사프로진": "oxaprozin",
+            "피록시캠": "piroxicam",
+            "펜타조신": "pentazocine",
+            "부프레노르핀": "buprenorphine",
+            "펜타닐": "fentanyl",
+            "히드로모르폰": "hydromorphone",
+            "메타돈": "methadone",
+            "부프레노르핀": "buprenorphine",
+            "날트렉손": "naltrexone",
+            "날록손": "naloxone",
+            "부프레노르핀": "buprenorphine",
+            "펜타닐": "fentanyl",
+            "히드로모르폰": "hydromorphone",
+            "메타돈": "methadone",
+            "부프레노르핀": "buprenorphine",
+            "날트렉손": "naltrexone",
+            "날록손": "naloxone",
+        }
     
     def _generate_response(self, prompt: str, temperature: float = 0.1, max_tokens: int = 1000) -> str:
         """LLM을 사용하여 응답 생성"""
@@ -384,10 +483,18 @@ class TranslationRAG:
             return english_description
     
     def translate_korean_to_english(self, korean_text: str) -> str:
-        """한국어를 영어로 번역 (성분명 변환용)"""
+        """한국어를 영어로 번역 (성분명 변환용) - 🚀 성능 최적화: 사전 우선 사용"""
         if not korean_text:
             return ""
         
+        # 🚀 성능 최적화: 사전에 있으면 즉시 반환 (LLM 호출 없음)
+        korean_clean = korean_text.strip()
+        if korean_clean in self.korean_to_english_dict:
+            english_name = self.korean_to_english_dict[korean_clean]
+            print(f"📚 사전에서 발견 (LLM 스킵): '{korean_clean}' → '{english_name}'")
+            return english_name
+        
+        # 사전에 없으면 LLM 호출
         prompt = f"""
 당신은 의학 전문가입니다. 다음 한국어 성분명을 정확한 영어명으로 변환해주세요.
 
@@ -405,7 +512,12 @@ class TranslationRAG:
         
         try:
             response = self._generate_response(prompt)
-            return response.strip()
+            english_name = response.strip()
+            # 🚀 성능 최적화: 변환 결과를 사전에 추가 (다음번에는 LLM 호출 없음)
+            if english_name and english_name != korean_text:
+                self.korean_to_english_dict[korean_clean] = english_name
+                print(f"💾 사전에 추가: '{korean_clean}' → '{english_name}'")
+            return english_name
         except Exception as e:
             print(f"⚠️ 한국어→영어 번역 오류: {e}")
             return korean_text  # 실패 시 원본 반환

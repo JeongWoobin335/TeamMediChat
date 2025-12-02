@@ -90,14 +90,36 @@ pdf_retriever = ContextualCompressionRetriever(
 )
 
 # === Excel 인덱싱 및 검색기 ===
+# 기존 Excel 파일들
 excel_files = [rf"C:\Users\jung\Desktop\11\e약은요정보검색{i}.xlsx" for i in range(1, 6)]
-required_columns = [
-    "제품명",
-    "이 약의 효능은 무엇입니까?",  # 정확한 컬럼명
-    "이 약은 어떤 이상반응이 나타날 수 있습니까?",  # 정확한 컬럼명
-    "이 약은 어떻게 사용합니까?",
-    "주성분"  # 주성분 컬럼 추가
-]
+
+# ============================================
+# 새 Excel 파일 추가하기
+# ============================================
+# 새 Excel 파일 경로 추가
+new_excel_file = r"C:\Users\jung\Desktop\33\OpenData_ItemPermitDetail20251115.xls"
+excel_files.append(new_excel_file)
+
+# 파일별 컬럼명 매핑 (파일 경로를 키로 사용)
+file_column_mappings = {}  # {파일경로: 컬럼매핑}
+
+# 기본 컬럼명 (기존 파일용)
+default_columns = {
+    "제품명": "제품명",
+    "효능": "이 약의 효능은 무엇입니까?",
+    "부작용": "이 약은 어떤 이상반응이 나타날 수 있습니까?",
+    "사용법": "이 약은 어떻게 사용합니까?",
+    "주성분": "주성분"
+}
+
+# 새 Excel 파일의 컬럼명 매핑 (효능효과, 용법용량, 주의사항만 추출)
+file_column_mappings[new_excel_file] = {
+    "제품명": "품목명",      # 제품명 컬럼 (필수)
+    "효능": "효능효과",      # 효능효과 컬럼
+    "부작용": "주의사항",    # 주의사항 컬럼
+    "사용법": "용법용량",    # 용법용량 컬럼
+    "주성분": ""             # 주성분은 사용하지 않음 (빈 문자열)
+}
 
 # 전역 변수 초기화
 excel_docs = []
@@ -145,22 +167,58 @@ if excel_vectordb is None:
         if not os.path.exists(file): 
             print(f"❌ 파일이 존재하지 않음: {file}")
             continue
+        
         df = pd.read_excel(file)
-        if not all(col in df.columns for col in required_columns): 
-            print(f"❌ 필수 컬럼 누락: {[col for col in required_columns if col not in df.columns]}")
+        
+        # 파일별 컬럼 매핑 확인
+        if file in file_column_mappings:
+            col_mapping = file_column_mappings[file]
+        else:
+            # 기본 매핑 사용 (기존 파일)
+            col_mapping = default_columns
+        
+        # 실제 컬럼명 확인 (빈 문자열 제외)
+        required_cols = [col for col in col_mapping.values() if col]  # 빈 문자열 제외
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            print(f"⚠️ 파일 '{os.path.basename(file)}'에서 컬럼 누락: {missing_cols}")
+            print(f"   사용 가능한 컬럼: {list(df.columns)[:10]}...")  # 처음 10개만 표시
+            # 누락된 컬럼이 있으면 건너뛰기
             continue
-
-        df = df[required_columns].fillna("정보 없음")
-        for _, row in df.iterrows():
+        
+        # 매핑된 컬럼으로 데이터 추출
+        # 주성분이 빈 문자열인 경우를 위해 실제 사용할 컬럼만 선택
+        actual_cols = []
+        actual_keys = []
+        for key, col_name in col_mapping.items():
+            if col_name:  # 빈 문자열이 아닌 경우만
+                actual_cols.append(col_name)
+                actual_keys.append(key)
+        
+        df_selected = df[actual_cols].fillna("정보 없음")
+        df_selected.columns = actual_keys  # 표준 컬럼명으로 변경
+        
+        # 주성분이 없는 경우를 위해 기본값 추가
+        if '주성분' not in df_selected.columns:
+            df_selected['주성분'] = '정보 없음'
+        
+        for row_idx, row in df_selected.iterrows():
             name = row["제품명"].strip()
+            if not name or name == "정보 없음":
+                continue
+                
             product_names.append(name)
             product_names_normalized.append(re.sub(r"[^\w가-힣]", "", name.lower()))
 
             # 스마트 청크 분할: 사용법을 별도 청크로 분리하여 보존
-            efficacy = row['이 약의 효능은 무엇입니까?']
-            side_effects = row['이 약은 어떤 이상반응이 나타날 수 있습니까?']
-            usage = row['이 약은 어떻게 사용합니까?']
-            main_ingredient = row.get('주성분', '정보 없음')  # 주성분 추가
+            efficacy = row['효능']
+            side_effects = row['부작용']
+            usage = row['사용법']
+            main_ingredient = row.get('주성분', '정보 없음')
+            
+            # PDF 링크는 나중에 필요할 때 다운로드하도록 URL만 저장
+            # Excel 로드 시에는 PDF 다운로드하지 않음 (성능 향상)
             
             # 메인 내용 (효능 + 부작용)
             content_main = (
@@ -183,7 +241,9 @@ if excel_vectordb is None:
                 doc_obj = Document(page_content=chunk, metadata={
                     "제품명": name, 
                     "주성분": main_ingredient,
-                    "type": "main"
+                    "type": "main",
+                    "excel_file": file,  # 원본 Excel 파일 경로
+                    "excel_row_index": row_idx  # Excel 행 인덱스
                 })
                 excel_docs.append(doc_obj)
             
@@ -193,7 +253,9 @@ if excel_vectordb is None:
                 doc_obj = Document(page_content=chunk, metadata={
                     "제품명": name, 
                     "주성분": main_ingredient,
-                    "type": "usage"
+                    "type": "usage",
+                    "excel_file": file,  # 원본 Excel 파일 경로
+                    "excel_row_index": row_idx  # Excel 행 인덱스
                 })
                 excel_docs.append(doc_obj)
 
@@ -366,7 +428,7 @@ dosage_warning_ingredients = {}  # 성분명 -> 용량 정보 매핑
 dosage_warning_loaded = False
 
 def load_dosage_warning_data():
-    """용량주의 성분 리스트 로드"""
+    """용량주의 성분 리스트 로드 (새 파일 형식: OpenData_PotOpenDurIngr_D20251115.xls)"""
     global dosage_warning_ingredients, dosage_warning_loaded
     
     print(f"🔍 용량주의 성분 리스트 로드 시도 - 현재 상태: loaded={dosage_warning_loaded}")
@@ -376,8 +438,8 @@ def load_dosage_warning_data():
         return dosage_warning_ingredients
     
     try:
-        # 용량주의 성분 리스트 파일 경로 (실제 파일 위치에 맞게 수정 필요)
-        dosage_file_path = r"C:\Users\jung\Desktop\22\용량주의 성분리스트_250530.xlsx"
+        # 새 용량주의 성분 리스트 파일 경로
+        dosage_file_path = r"C:\Users\jung\Desktop\22\OpenData_PotOpenDurIngr_D20251115.xls"
         
         print(f"🔍 파일 존재 확인: {dosage_file_path}")
         print(f"🔍 파일 존재 여부: {os.path.exists(dosage_file_path)}")
@@ -391,39 +453,13 @@ def load_dosage_warning_data():
         df = pd.read_excel(dosage_file_path)
         print(f"📊 엑셀 파일 로드 완료 - 행 수: {len(df)}, 컬럼: {list(df.columns)}")
         
-        # 실제 데이터가 시작되는 행 찾기 (헤더 행 건너뛰기)
-        data_start_row = 0
-        for idx, row in df.iterrows():
-            # 첫 번째 컬럼에 숫자가 있는 행을 찾기 (연번)
-            first_col = str(row.iloc[0]).strip()
-            if first_col.isdigit():
-                data_start_row = idx
-                break
+        # 사용할 컬럼 확인
+        required_columns = ['단일복합구분코드', 'DUR성분명', '복합제', '1일최대용량']
+        missing_columns = [col for col in required_columns if col not in df.columns]
         
-        print(f"🔍 데이터 시작 행: {data_start_row}")
-        
-        # 실제 데이터만 사용 (헤더 행 제외)
-        if data_start_row > 0:
-            df = df.iloc[data_start_row:].reset_index(drop=True)
-            print(f"🔍 헤더 제거 후 행 수: {len(df)}")
-        
-        # 컬럼명을 수동으로 매핑 (Unnamed 컬럼들)
-        # 일반적으로 용량주의 성분 리스트는 다음 순서: 연번, 성분명(국문), 성분명(영문), 제형, 1일 최대용량, 비고
-        actual_columns = {
-            'korean_name': df.columns[1] if len(df.columns) > 1 else None,  # 두 번째 컬럼
-            'english_name': df.columns[2] if len(df.columns) > 2 else None,  # 세 번째 컬럼
-            'formulation': df.columns[3] if len(df.columns) > 3 else None,    # 네 번째 컬럼
-            'max_daily_dose': df.columns[4] if len(df.columns) > 4 else None, # 다섯 번째 컬럼
-            'remarks': df.columns[5] if len(df.columns) > 5 else None         # 여섯 번째 컬럼
-        }
-        
-        print(f"🔍 수동 컬럼 매핑 결과: {actual_columns}")
-        
-        # None 값 제거
-        actual_columns = {k: v for k, v in actual_columns.items() if v is not None}
-        
-        if not actual_columns:
-            print("❌ 용량주의 성분 리스트 컬럼을 찾을 수 없습니다")
+        if missing_columns:
+            print(f"❌ 필수 컬럼이 없습니다: {missing_columns}")
+            print(f"   사용 가능한 컬럼: {list(df.columns)}")
             dosage_warning_loaded = True
             return dosage_warning_ingredients
         
@@ -432,36 +468,47 @@ def load_dosage_warning_data():
         print(f"🔍 데이터 처리 시작 - 총 {len(df)}행")
         
         for idx, row in df.iterrows():
-            korean_name = str(row.get(actual_columns.get('korean_name', ''), '')).strip()
-            english_name = str(row.get(actual_columns.get('english_name', ''), '')).strip()
-            formulation = str(row.get(actual_columns.get('formulation', ''), '')).strip()
-            max_dose = str(row.get(actual_columns.get('max_daily_dose', ''), '')).strip()
-            remarks = str(row.get(actual_columns.get('remarks', ''), '')).strip()
+            # 사용할 컬럼 추출
+            single_complex = str(row.get('단일복합구분코드', '')).strip()
+            ingredient_name = str(row.get('DUR성분명', '')).strip()
+            complex_medicine = str(row.get('복합제', '')).strip()
+            max_dose = str(row.get('1일최대용량', '')).strip()
             
-            if idx < 5:  # 처음 5개 행만 로그 출력
-                print(f"🔍 행 {idx}: 한글='{korean_name}', 영문='{english_name}', 용량='{max_dose}'")
-            
-            if not korean_name or korean_name == 'nan':
+            # NaN 값 처리
+            if pd.isna(row.get('DUR성분명')) or ingredient_name == 'nan' or not ingredient_name:
                 continue
             
-            # 한국어 성분명으로 매핑
-            dosage_warning_ingredients[korean_name] = {
-                'korean_name': korean_name,
-                'english_name': english_name,
-                'formulation': formulation,
-                'max_daily_dose': max_dose,
-                'remarks': remarks
+            if idx < 5:  # 처음 5개 행만 로그 출력
+                print(f"🔍 행 {idx}: 성분명='{ingredient_name}', 단일/복합='{single_complex}', 복합제='{complex_medicine}', 용량='{max_dose}'")
+            
+            # 데이터 구조 구성 (기존 구조와 호환성 유지)
+            ingredient_data = {
+                'korean_name': ingredient_name,
+                'english_name': '',  # 새 파일에는 영문명이 별도 컬럼으로 없음
+                'formulation': '',  # 제형 정보는 별도 컬럼으로 없음
+                'max_daily_dose': max_dose if max_dose != 'nan' else '',
+                'remarks': f"단일/복합: {single_complex}" + (f", 복합제: {complex_medicine}" if complex_medicine != 'nan' and complex_medicine else ""),
+                'single_complex': single_complex,  # 새 필드 추가
+                'complex_medicine': complex_medicine if complex_medicine != 'nan' else ''  # 새 필드 추가
             }
             
-            # 영어 성분명으로도 매핑 (있는 경우)
-            if english_name and english_name != 'nan':
-                dosage_warning_ingredients[english_name] = {
-                    'korean_name': korean_name,
-                    'english_name': english_name,
-                    'formulation': formulation,
-                    'max_daily_dose': max_dose,
-                    'remarks': remarks
-                }
+            # 한국어 성분명으로 매핑
+            dosage_warning_ingredients[ingredient_name] = ingredient_data
+            
+            # 복합제인 경우 복합제 성분명도 매핑 (관계성분 정보 활용)
+            if single_complex == '복합' and complex_medicine and complex_medicine != 'nan':
+                # 복합제 정보에서 성분명 추출 시도 (예: "[D001312]Naltrexone(날트렉손)" 형식)
+                # 괄호 안의 한글명 추출
+                korean_match = re.search(r'\(([가-힣]+)\)', complex_medicine)
+                if korean_match:
+                    complex_ingredient_name = korean_match.group(1)
+                    # 복합제 성분도 별도로 매핑 (용량 정보는 주성분과 동일)
+                    if complex_ingredient_name not in dosage_warning_ingredients:
+                        dosage_warning_ingredients[complex_ingredient_name] = {
+                            **ingredient_data,
+                            'korean_name': complex_ingredient_name,
+                            'remarks': f"복합제 구성 성분 (주성분: {ingredient_name})"
+                        }
             
             processed_count += 1
         
@@ -471,6 +518,8 @@ def load_dosage_warning_data():
         
     except Exception as e:
         print(f"❌ 용량주의 성분 리스트 로드 실패: {e}")
+        import traceback
+        traceback.print_exc()
         dosage_warning_loaded = True
     
     return dosage_warning_ingredients
@@ -523,6 +572,307 @@ def get_medicine_dosage_warnings(medicine_name: str) -> List[dict]:
     print(f"🔍 최종 용량주의 성분 개수: {len(warnings)}")
     return warnings
 
+# === 연령대 금기 성분 데이터 처리 ===
+age_contraindication_ingredients = {}  # 성분명 -> 연령대별 금기 정보 매핑
+age_contraindication_loaded = False
+
+def load_age_contraindication_data():
+    """연령대 금기 성분 리스트 로드 (OpenData_PotOpenDurIngr_B20251117.xls)"""
+    global age_contraindication_ingredients, age_contraindication_loaded
+    
+    print(f"🔍 연령대 금기 성분 리스트 로드 시도 - 현재 상태: loaded={age_contraindication_loaded}")
+    
+    if age_contraindication_loaded:
+        print(f"📂 이미 로드됨 - 총 {len(age_contraindication_ingredients)}개 성분")
+        return age_contraindication_ingredients
+    
+    try:
+        # 연령대 금기 성분 파일 경로
+        age_contraindication_file = r"C:\Users\jung\Desktop\44\OpenData_PotOpenDurIngr_B20251117.xls"
+        
+        print(f"🔍 파일 존재 확인: {age_contraindication_file}")
+        
+        if not os.path.exists(age_contraindication_file):
+            print(f"⚠️ 연령대 금기 성분 파일을 찾을 수 없습니다: {age_contraindication_file}")
+            age_contraindication_loaded = True
+            return age_contraindication_ingredients
+        
+        print("📊 연령대 금기 성분 리스트 로드 중...")
+        df = pd.read_excel(age_contraindication_file)
+        print(f"📊 엑셀 파일 로드 완료 - 행 수: {len(df)}, 컬럼: {list(df.columns)}")
+        
+        # 사용할 컬럼 확인
+        required_columns = ['DUR성분명', '연령기준', '금기내용']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            print(f"❌ 필수 컬럼이 없습니다: {missing_columns}")
+            print(f"   사용 가능한 컬럼: {list(df.columns)}")
+            age_contraindication_loaded = True
+            return age_contraindication_ingredients
+        
+        # 데이터 처리
+        processed_count = 0
+        print(f"🔍 데이터 처리 시작 - 총 {len(df)}행")
+        
+        for idx, row in df.iterrows():
+            ingredient_name = str(row.get('DUR성분명', '')).strip()
+            age_criteria = str(row.get('연령기준', '')).strip()
+            contraindication = str(row.get('금기내용', '')).strip()
+            
+            # NaN 값 처리
+            if pd.isna(row.get('DUR성분명')) or ingredient_name == 'nan' or not ingredient_name:
+                continue
+            
+            if idx < 5:  # 처음 5개 행만 로그 출력
+                print(f"🔍 행 {idx}: 성분명='{ingredient_name}', 연령기준='{age_criteria}', 금기내용='{contraindication[:50] if contraindication else '없음'}...'")
+            
+            # 성분명이 이미 있으면 리스트에 추가, 없으면 새로 생성
+            if ingredient_name not in age_contraindication_ingredients:
+                age_contraindication_ingredients[ingredient_name] = {
+                    'korean_name': ingredient_name,
+                    'age_contraindications': []  # 여러 연령대별 금기 정보를 리스트로 저장
+                }
+            
+            # 연령대별 금기 정보 추가
+            if age_criteria and age_criteria != 'nan' and contraindication and contraindication != 'nan':
+                age_contraindication_ingredients[ingredient_name]['age_contraindications'].append({
+                    'age_criteria': age_criteria,
+                    'contraindication': contraindication
+                })
+            
+            processed_count += 1
+        
+        print(f"✅ 연령대 금기 성분 {len(age_contraindication_ingredients)}개 로드 완료 (처리된 행: {processed_count}개)")
+        print(f"🔍 로드된 성분 예시: {list(age_contraindication_ingredients.keys())[:5]}")
+        age_contraindication_loaded = True
+        
+    except Exception as e:
+        print(f"❌ 연령대 금기 성분 리스트 로드 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        age_contraindication_loaded = True
+    
+    return age_contraindication_ingredients
+
+def find_age_contraindication_info(ingredient_name: str) -> dict:
+    """특정 성분의 연령대별 금기 정보 찾기"""
+    if not age_contraindication_loaded:
+        load_age_contraindication_data()
+    
+    # 정확한 매칭 시도
+    if ingredient_name in age_contraindication_ingredients:
+        return age_contraindication_ingredients[ingredient_name]
+    
+    # 부분 매칭 시도
+    for key, value in age_contraindication_ingredients.items():
+        if ingredient_name in key or key in ingredient_name:
+            return value
+    
+    # 정규화된 매칭 시도
+    normalized_ingredient = re.sub(r'[^\w가-힣]', '', ingredient_name.lower())
+    for key, value in age_contraindication_ingredients.items():
+        normalized_key = re.sub(r'[^\w가-힣]', '', key.lower())
+        if normalized_ingredient in normalized_key or normalized_key in normalized_ingredient:
+            return value
+    
+    return None
+
+def get_medicine_age_contraindications(medicine_name: str) -> List[dict]:
+    """약품의 주성분들 중 연령대 금기 성분이 있는지 확인"""
+    print(f"🔍 연령대 금기 성분 확인 시작: '{medicine_name}'")
+    
+    contraindications = []
+    
+    # 약품의 주성분 추출
+    ingredients = extract_active_ingredients_from_medicine(medicine_name)
+    print(f"🔍 추출된 주성분: {ingredients}")
+    
+    for ingredient in ingredients:
+        print(f"🔍 성분 '{ingredient}' 연령대 금기 확인 중...")
+        age_info = find_age_contraindication_info(ingredient)
+        if age_info and age_info.get('age_contraindications'):
+            print(f"✅ 연령대 금기 성분 발견: '{ingredient}' - {len(age_info['age_contraindications'])}개 금기 정보")
+            contraindications.append({
+                'ingredient': ingredient,
+                'age_contraindication_info': age_info
+            })
+        else:
+            print(f"❌ 연령대 금기 성분 아님: '{ingredient}'")
+    
+    print(f"🔍 최종 연령대 금기 성분 개수: {len(contraindications)}")
+    return contraindications
+
+# === 일일 최대 투여량 데이터 처리 ===
+daily_max_dosage_ingredients = {}  # 성분명 -> 일일 최대 투여량 정보 매핑
+daily_max_dosage_loaded = False
+
+def load_daily_max_dosage_data():
+    """일일 최대 투여량 정보 로드 (OpenData_DayMaxDosgQyInfo20251116.xls)"""
+    global daily_max_dosage_ingredients, daily_max_dosage_loaded
+    
+    print(f"🔍 일일 최대 투여량 정보 로드 시도 - 현재 상태: loaded={daily_max_dosage_loaded}")
+    
+    if daily_max_dosage_loaded:
+        print(f"📂 이미 로드됨 - 총 {len(daily_max_dosage_ingredients)}개 성분")
+        return daily_max_dosage_ingredients
+    
+    try:
+        # 일일 최대 투여량 파일 경로
+        daily_max_dosage_file = r"C:\Users\jung\Desktop\55\OpenData_DayMaxDosgQyInfo20251116.xls"
+        
+        print(f"🔍 파일 존재 확인: {daily_max_dosage_file}")
+        
+        if not os.path.exists(daily_max_dosage_file):
+            print(f"⚠️ 일일 최대 투여량 파일을 찾을 수 없습니다: {daily_max_dosage_file}")
+            daily_max_dosage_loaded = True
+            return daily_max_dosage_ingredients
+        
+        print("📊 일일 최대 투여량 정보 로드 중...")
+        df = pd.read_excel(daily_max_dosage_file)
+        print(f"📊 엑셀 파일 로드 완료 - 행 수: {len(df)}, 컬럼: {list(df.columns)}")
+        
+        # 사용할 컬럼 확인
+        required_columns = ['성분명(한글)', '제형명', '투여단위', '1일최대투여량']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            print(f"❌ 필수 컬럼이 없습니다: {missing_columns}")
+            print(f"   사용 가능한 컬럼: {list(df.columns)}")
+            daily_max_dosage_loaded = True
+            return daily_max_dosage_ingredients
+        
+        # 데이터 처리
+        processed_count = 0
+        print(f"🔍 데이터 처리 시작 - 총 {len(df)}행")
+        
+        for idx, row in df.iterrows():
+            ingredient_name = str(row.get('성분명(한글)', '')).strip()
+            formulation = str(row.get('제형명', '')).strip()
+            dosage_unit = str(row.get('투여단위', '')).strip()
+            max_daily_dosage = str(row.get('1일최대투여량', '')).strip()
+            
+            # NaN 값 처리
+            if pd.isna(row.get('성분명(한글)')) or ingredient_name == 'nan' or not ingredient_name:
+                continue
+            
+            if idx < 5:  # 처음 5개 행만 로그 출력
+                print(f"🔍 행 {idx}: 성분명='{ingredient_name}', 제형='{formulation}', 단위='{dosage_unit}', 최대투여량='{max_daily_dosage}'")
+            
+            # 성분명이 이미 있으면 리스트에 추가, 없으면 새로 생성
+            if ingredient_name not in daily_max_dosage_ingredients:
+                daily_max_dosage_ingredients[ingredient_name] = {
+                    'korean_name': ingredient_name,
+                    'dosage_info': []  # 여러 제형별 투여량 정보를 리스트로 저장
+                }
+            
+            # 제형별 투여량 정보 추가
+            if max_daily_dosage and max_daily_dosage != 'nan':
+                daily_max_dosage_ingredients[ingredient_name]['dosage_info'].append({
+                    'formulation': formulation if formulation != 'nan' else '',
+                    'dosage_unit': dosage_unit if dosage_unit != 'nan' else '',
+                    'max_daily_dosage': max_daily_dosage
+                })
+            
+            processed_count += 1
+        
+        print(f"✅ 일일 최대 투여량 정보 {len(daily_max_dosage_ingredients)}개 성분 로드 완료 (처리된 행: {processed_count}개)")
+        print(f"🔍 로드된 성분 예시: {list(daily_max_dosage_ingredients.keys())[:5]}")
+        daily_max_dosage_loaded = True
+        
+    except Exception as e:
+        print(f"❌ 일일 최대 투여량 정보 로드 실패: {e}")
+        import traceback
+        traceback.print_exc()
+        daily_max_dosage_loaded = True
+    
+    return daily_max_dosage_ingredients
+
+def find_daily_max_dosage_info(ingredient_name: str, formulation: str = None) -> dict:
+    """특정 성분의 일일 최대 투여량 정보 찾기"""
+    if not daily_max_dosage_loaded:
+        load_daily_max_dosage_data()
+    
+    # 정확한 매칭 시도
+    if ingredient_name in daily_max_dosage_ingredients:
+        ingredient_info = daily_max_dosage_ingredients[ingredient_name]
+        
+        # 제형이 지정된 경우 해당 제형 정보만 반환
+        if formulation:
+            for dosage_info in ingredient_info.get('dosage_info', []):
+                if formulation in dosage_info.get('formulation', '') or dosage_info.get('formulation', '') in formulation:
+                    return {
+                        'ingredient': ingredient_name,
+                        'formulation': dosage_info.get('formulation', ''),
+                        'dosage_unit': dosage_info.get('dosage_unit', ''),
+                        'max_daily_dosage': dosage_info.get('max_daily_dosage', '')
+                    }
+        
+        # 제형이 지정되지 않았거나 매칭되지 않은 경우 첫 번째 정보 반환
+        if ingredient_info.get('dosage_info'):
+            first_info = ingredient_info['dosage_info'][0]
+            return {
+                'ingredient': ingredient_name,
+                'formulation': first_info.get('formulation', ''),
+                'dosage_unit': first_info.get('dosage_unit', ''),
+                'max_daily_dosage': first_info.get('max_daily_dosage', ''),
+                'all_formulations': ingredient_info.get('dosage_info', [])  # 모든 제형 정보도 포함
+            }
+        
+        return ingredient_info
+    
+    # 부분 매칭 시도
+    for key, value in daily_max_dosage_ingredients.items():
+        if ingredient_name in key or key in ingredient_name:
+            if value.get('dosage_info'):
+                first_info = value['dosage_info'][0]
+                return {
+                    'ingredient': key,
+                    'formulation': first_info.get('formulation', ''),
+                    'dosage_unit': first_info.get('dosage_unit', ''),
+                    'max_daily_dosage': first_info.get('max_daily_dosage', ''),
+                    'all_formulations': value.get('dosage_info', [])
+                }
+    
+    # 정규화된 매칭 시도
+    normalized_ingredient = re.sub(r'[^\w가-힣]', '', ingredient_name.lower())
+    for key, value in daily_max_dosage_ingredients.items():
+        normalized_key = re.sub(r'[^\w가-힣]', '', key.lower())
+        if normalized_ingredient in normalized_key or normalized_key in normalized_ingredient:
+            if value.get('dosage_info'):
+                first_info = value['dosage_info'][0]
+                return {
+                    'ingredient': key,
+                    'formulation': first_info.get('formulation', ''),
+                    'dosage_unit': first_info.get('dosage_unit', ''),
+                    'max_daily_dosage': first_info.get('max_daily_dosage', ''),
+                    'all_formulations': value.get('dosage_info', [])
+                }
+    
+    return None
+
+def get_medicine_daily_max_dosage(medicine_name: str) -> List[dict]:
+    """약품의 주성분들 중 일일 최대 투여량 정보가 있는지 확인"""
+    print(f"🔍 일일 최대 투여량 정보 확인 시작: '{medicine_name}'")
+    
+    dosage_infos = []
+    
+    # 약품의 주성분 추출
+    ingredients = extract_active_ingredients_from_medicine(medicine_name)
+    print(f"🔍 추출된 주성분: {ingredients}")
+    
+    for ingredient in ingredients:
+        print(f"🔍 성분 '{ingredient}' 일일 최대 투여량 확인 중...")
+        dosage_info = find_daily_max_dosage_info(ingredient)
+        if dosage_info:
+            print(f"✅ 일일 최대 투여량 정보 발견: '{ingredient}' - {dosage_info.get('max_daily_dosage', '정보 없음')}")
+            dosage_infos.append(dosage_info)
+        else:
+            print(f"❌ 일일 최대 투여량 정보 없음: '{ingredient}'")
+    
+    print(f"🔍 최종 일일 최대 투여량 정보 개수: {len(dosage_infos)}")
+    return dosage_infos
+
 # === Export 대상 ===
 __all__ = [
     "pdf_retriever",
@@ -541,5 +891,11 @@ __all__ = [
     "find_products_by_ingredient",
     "load_dosage_warning_data",
     "find_dosage_warning_info",
-    "get_medicine_dosage_warnings"
+    "get_medicine_dosage_warnings",
+    "load_age_contraindication_data",
+    "find_age_contraindication_info",
+    "get_medicine_age_contraindications",
+    "load_daily_max_dosage_data",
+    "find_daily_max_dosage_info",
+    "get_medicine_daily_max_dosage"
 ]

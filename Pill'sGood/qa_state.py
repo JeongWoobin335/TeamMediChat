@@ -7,7 +7,9 @@ class QAState(TypedDict, total=False):
     각 노드에서 참조하거나 수정할 수 있는 주요 필드들은 다음과 같습니다:
 
     - 사용자 입력 관련
-        - query: 사용자 원 질문
+        - query: 사용자 원 질문 (ChatGPT 보정 후)
+        - original_query: 사용자 원본 질문 (보정 전)
+        - query_was_refined: 질문 보정 여부 (Optional[bool])
         - cleaned_query: 약품명 정제 결과
         - normalized_query: 약품명 정규화 결과
 
@@ -63,11 +65,15 @@ class QAState(TypedDict, total=False):
         - search_strategy: Optional[str]
 
     - 최종 생성 결과
-        - final_answer: LLM이 생성한 최종 응답 텍스트
+        - final_answer: LLM이 생성한 최종 응답 텍스트 (ChatGPT 재구성 후)
+        - original_answer: 원본 답변 (ChatGPT 재구성 전)
+        - answer_was_polished: 답변 재구성 여부 (Optional[bool])
     """
 
     # 사용자 입력 관련
     query: str
+    original_query: Optional[str]  # 원본 질문 (ChatGPT 보정 전)
+    query_was_refined: Optional[bool]  # 질문 보정 여부
     cleaned_query: Optional[str]
     normalized_query: Optional[str]
     
@@ -142,6 +148,9 @@ class QAState(TypedDict, total=False):
     korean_ingredient_info: Optional[dict]
     international_ingredient_info: Optional[dict]
     combined_analysis: Optional[dict]
+    merged_medicine_info: Optional[dict]  # 병합된 약품 정보 (PDF 포함)
 
     # 최종 생성 결과
     final_answer: Optional[str]
+    original_answer: Optional[str]  # 원본 답변 (ChatGPT 재구성 전)
+    answer_was_polished: Optional[bool]  # 답변 재구성 여부

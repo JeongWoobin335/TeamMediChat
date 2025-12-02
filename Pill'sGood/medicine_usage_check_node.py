@@ -174,26 +174,258 @@ def find_medicine_info(medicine_name: str, all_docs: List[Document], is_ocr_resu
     if not exact_matches:
         return medicine_info
     
-    # 약품 정보 수집
+    # 약품 정보 수집 (여러 Excel 파일에서 병합)
+    import os
+    import re
+    url_pattern = r'https?://[^\s]+'
+    
+    # 새 Excel 파일 우선순위 설정
+    new_excel_file = r"C:\Users\jung\Desktop\33\OpenData_ItemPermitDetail20251115.xls"
+    
+    # 모든 매칭된 문서를 파일별로 그룹화
+    docs_by_file = {}
     for doc in exact_matches:
-        content = doc.page_content
-        doc_type = doc.metadata.get("type", "")
+        excel_file = doc.metadata.get("excel_file")
+        if excel_file:
+            if excel_file not in docs_by_file:
+                docs_by_file[excel_file] = []
+            docs_by_file[excel_file].append(doc)
+    
+    # 새 Excel 파일이 있으면 우선순위로 설정
+    file_priority = []
+    if new_excel_file in docs_by_file:
+        file_priority.append(new_excel_file)
+    for file in docs_by_file.keys():
+        if file != new_excel_file:
+            file_priority.append(file)
+    
+    print(f"📂 약품 정보 출처 파일: {len(file_priority)}개 파일에서 발견")
+    for file in file_priority:
+        print(f"  - {os.path.basename(file)} ({len(docs_by_file[file])}개 청크)")
+    
+    # 모든 Excel 파일에서 정보 수집 (파일별로 그룹화)
+    excel_file = None
+    excel_row_index = None
+    
+    # 각 파일별로 정보를 수집하여 리스트로 저장
+    all_efficacy_info = []  # [(파일명, 효능정보), ...]
+    all_side_effects_info = []  # [(파일명, 부작용정보), ...]
+    all_usage_info = []  # [(파일명, 사용법정보), ...]
+    
+    for file in file_priority:
+        file_name = os.path.basename(file)
+        file_efficacy = None
+        file_side_effects = None
+        file_usage = None
         
-        # 효능과 부작용은 main 타입에서 추출
-        if doc_type == "main" or doc_type == "":
-            efficacy = extract_field_from_doc(content, "효능")
-            side_effects = extract_field_from_doc(content, "부작용")
+        for doc in docs_by_file[file]:
+            content = doc.page_content
+            doc_type = doc.metadata.get("type", "")
             
-            if efficacy != "정보 없음":
-                medicine_info["효능"] = efficacy
-            if side_effects != "정보 없음":
-                medicine_info["부작용"] = side_effects
+            # Excel 파일 정보 저장 (우선순위가 높은 파일에서)
+            if not excel_file:
+                excel_file = doc.metadata.get("excel_file")
+                excel_row_index = doc.metadata.get("excel_row_index")
+            
+            # 효능과 부작용은 main 타입에서 추출
+            if doc_type == "main" or doc_type == "":
+                efficacy = extract_field_from_doc(content, "효능")
+                side_effects = extract_field_from_doc(content, "부작용")
+                
+                # URL이 아닌 경우에만 수집
+                if efficacy != "정보 없음" and not re.search(url_pattern, str(efficacy)):
+                    if file_efficacy is None:
+                        file_efficacy = efficacy
+                    else:
+                        # 같은 파일 내에서 여러 청크가 있으면 더 긴 것을 선택
+                        if len(efficacy) > len(file_efficacy):
+                            file_efficacy = efficacy
+                
+                if side_effects != "정보 없음" and not re.search(url_pattern, str(side_effects)):
+                    if file_side_effects is None:
+                        file_side_effects = side_effects
+                    else:
+                        if len(side_effects) > len(file_side_effects):
+                            file_side_effects = side_effects
+            
+            # 사용법은 usage 타입에서 추출
+            if doc_type == "usage":
+                usage = extract_field_from_doc(content, "사용법")
+                if usage != "정보 없음" and not re.search(url_pattern, str(usage)):
+                    if file_usage is None:
+                        file_usage = usage
+                    else:
+                        if len(usage) > len(file_usage):
+                            file_usage = usage
         
-        # 사용법은 usage 타입에서 추출
-        if doc_type == "usage":
-            usage = extract_field_from_doc(content, "사용법")
-            if usage != "정보 없음":
-                medicine_info["사용법"] = usage
+        # 파일별로 수집한 정보를 리스트에 추가
+        if file_efficacy:
+            all_efficacy_info.append((file_name, file_efficacy))
+            print(f"📋 {file_name}에서 효능 정보 수집: {len(file_efficacy)}자")
+        if file_side_effects:
+            all_side_effects_info.append((file_name, file_side_effects))
+            print(f"📋 {file_name}에서 부작용 정보 수집: {len(file_side_effects)}자")
+        if file_usage:
+            all_usage_info.append((file_name, file_usage))
+            print(f"📋 {file_name}에서 사용법 정보 수집: {len(file_usage)}자")
+    
+    # 여러 소스의 정보를 LLM으로 병합
+    if len(all_efficacy_info) > 1:
+        print(f"🔄 {len(all_efficacy_info)}개 소스의 효능 정보 병합 중...")
+        merged_efficacy = merge_multiple_sources_with_llm(all_efficacy_info, "효능")
+        medicine_info["효능"] = merged_efficacy
+    elif len(all_efficacy_info) == 1:
+        medicine_info["효능"] = all_efficacy_info[0][1]
+    
+    if len(all_side_effects_info) > 1:
+        print(f"🔄 {len(all_side_effects_info)}개 소스의 부작용 정보 병합 중...")
+        merged_side_effects = merge_multiple_sources_with_llm(all_side_effects_info, "부작용")
+        medicine_info["부작용"] = merged_side_effects
+    elif len(all_side_effects_info) == 1:
+        medicine_info["부작용"] = all_side_effects_info[0][1]
+    
+    if len(all_usage_info) > 1:
+        print(f"🔄 {len(all_usage_info)}개 소스의 사용법 정보 병합 중...")
+        merged_usage = merge_multiple_sources_with_llm(all_usage_info, "사용법")
+        medicine_info["사용법"] = merged_usage
+    elif len(all_usage_info) == 1:
+        medicine_info["사용법"] = all_usage_info[0][1]
+    
+    # PDF 링크 확인 및 다운로드 (모든 파일에서 수집하여 병합)
+    from pdf_link_extractor import enrich_excel_row_with_pdf_content
+    from retrievers import file_column_mappings, default_columns
+    
+    # 모든 파일에서 PDF 정보 수집
+    all_pdf_efficacy = []
+    all_pdf_side_effects = []
+    all_pdf_usage = []
+    
+    for file in file_priority:
+        # 해당 파일의 문서에서 excel_row_index 찾기
+        file_row_index = None
+        for doc in docs_by_file[file]:
+            if doc.metadata.get("excel_file") == file:
+                file_row_index = doc.metadata.get("excel_row_index")
+                if file_row_index is not None:
+                    break
+        
+        if file_row_index is None:
+            continue
+        
+        print(f"📥 PDF 다운로드 시도: {os.path.basename(file)}, 행 {file_row_index}")
+        try:
+            # 파일별 컬럼 매핑 확인
+            if file in file_column_mappings:
+                col_mapping = file_column_mappings[file]
+            else:
+                col_mapping = default_columns
+            
+            pdf_column_mapping = {
+                '효능': col_mapping['효능'],
+                '복용법': col_mapping['사용법'],
+                '주의사항': col_mapping['부작용']
+            }
+            
+            # 효능, 부작용, 사용법이 URL인지 확인하고 PDF 다운로드
+            pdf_content = enrich_excel_row_with_pdf_content(
+                file, file_row_index, ['효능', '주의사항', '복용법'], pdf_column_mapping
+            )
+            
+            print(f"📋 PDF 내용 확인: {list(pdf_content.keys())}")
+            for key, value in pdf_content.items():
+                if value:
+                    print(f"  - {key}: {len(str(value))}자 - {str(value)[:100]}...")
+                    # PDF 정보를 리스트에 추가
+                    file_name = os.path.basename(file)
+                    if key == '효능' and value:
+                        all_pdf_efficacy.append((file_name, value))
+                    elif key == '주의사항' and value:
+                        all_pdf_side_effects.append((file_name, value))
+                    elif key == '복용법' and value:
+                        all_pdf_usage.append((file_name, value))
+                else:
+                    print(f"  - {key}: None")
+        
+        except Exception as e:
+            print(f"⚠️ {os.path.basename(file)} PDF 다운로드 실패 (계속 진행): {e}")
+    
+    # PDF 정보를 기존 Excel 정보와 병합
+    if all_pdf_efficacy:
+        current_efficacy = medicine_info.get("효능", "정보 없음")
+        if current_efficacy != "정보 없음":
+            # Excel 정보와 PDF 정보를 모두 병합
+            all_efficacy_sources = all_efficacy_info + all_pdf_efficacy
+            if len(all_efficacy_sources) > 1:
+                print(f"🔄 Excel + PDF 효능 정보 병합 중... ({len(all_efficacy_sources)}개 소스)")
+                merged_efficacy = merge_multiple_sources_with_llm(all_efficacy_sources, "효능")
+                medicine_info["효능"] = merged_efficacy
+            else:
+                medicine_info["효능"] = all_efficacy_sources[0][1]
+        else:
+            # Excel 정보가 없으면 PDF 정보만 사용
+            if len(all_pdf_efficacy) > 1:
+                merged_efficacy = merge_multiple_sources_with_llm(all_pdf_efficacy, "효능")
+                medicine_info["효능"] = merged_efficacy
+            elif len(all_pdf_efficacy) == 1:
+                medicine_info["효능"] = all_pdf_efficacy[0][1]
+    
+    if all_pdf_side_effects:
+        current_side_effects = medicine_info.get("부작용", "정보 없음")
+        if current_side_effects != "정보 없음":
+            # Excel 정보와 PDF 정보를 모두 병합
+            all_side_effects_sources = all_side_effects_info + all_pdf_side_effects
+            if len(all_side_effects_sources) > 1:
+                print(f"🔄 Excel + PDF 부작용 정보 병합 중... ({len(all_side_effects_sources)}개 소스)")
+                merged_side_effects = merge_multiple_sources_with_llm(all_side_effects_sources, "부작용")
+                medicine_info["부작용"] = merged_side_effects
+            else:
+                medicine_info["부작용"] = all_side_effects_sources[0][1]
+        else:
+            # Excel 정보가 없으면 PDF 정보만 사용
+            if len(all_pdf_side_effects) > 1:
+                merged_side_effects = merge_multiple_sources_with_llm(all_pdf_side_effects, "부작용")
+                medicine_info["부작용"] = merged_side_effects
+            elif len(all_pdf_side_effects) == 1:
+                medicine_info["부작용"] = all_pdf_side_effects[0][1]
+    
+    if all_pdf_usage:
+        current_usage = medicine_info.get("사용법", "정보 없음")
+        if current_usage != "정보 없음":
+            # Excel 정보와 PDF 정보를 모두 병합
+            all_usage_sources = all_usage_info + all_pdf_usage
+            if len(all_usage_sources) > 1:
+                print(f"🔄 Excel + PDF 사용법 정보 병합 중... ({len(all_usage_sources)}개 소스)")
+                merged_usage = merge_multiple_sources_with_llm(all_usage_sources, "사용법")
+                medicine_info["사용법"] = merged_usage
+            else:
+                medicine_info["사용법"] = all_usage_sources[0][1]
+        else:
+            # Excel 정보가 없으면 PDF 정보만 사용
+            if len(all_pdf_usage) > 1:
+                merged_usage = merge_multiple_sources_with_llm(all_pdf_usage, "사용법")
+                medicine_info["사용법"] = merged_usage
+            elif len(all_pdf_usage) == 1:
+                medicine_info["사용법"] = all_pdf_usage[0][1]
+    
+    # 연령대 금기 성분 정보 추가
+    try:
+        from retrievers import get_medicine_age_contraindications
+        age_contraindications = get_medicine_age_contraindications(medicine_name)
+        if age_contraindications:
+            medicine_info["연령대_금기_정보"] = age_contraindications
+            print(f"✅ 연령대 금기 정보 추가: {len(age_contraindications)}개 성분")
+    except Exception as e:
+        print(f"⚠️ 연령대 금기 정보 수집 실패: {e}")
+    
+    # 일일 최대 투여량 정보 추가
+    try:
+        from retrievers import get_medicine_daily_max_dosage
+        daily_max_dosage = get_medicine_daily_max_dosage(medicine_name)
+        if daily_max_dosage:
+            medicine_info["일일_최대_투여량_정보"] = daily_max_dosage
+            print(f"✅ 일일 최대 투여량 정보 추가: {len(daily_max_dosage)}개 성분")
+    except Exception as e:
+        print(f"⚠️ 일일 최대 투여량 정보 수집 실패: {e}")
     
     return medicine_info
 
@@ -202,6 +434,135 @@ def extract_field_from_doc(text: str, label: str) -> str:
     pattern = rf"\[{label}\]:\s*((?:.|\n)*?)(?=\n\[|\Z)"
     match = re.search(pattern, text)
     return match.group(1).strip() if match else "정보 없음"
+
+def merge_multiple_sources_with_llm(sources_info: List[tuple], field_name: str) -> str:
+    """
+    여러 소스의 정보를 LLM으로 병합합니다.
+    중복 내용은 제거하고, 각 소스의 고유한 내용은 모두 포함합니다.
+    
+    Args:
+        sources_info: [(소스명, 정보), ...] 형식의 리스트
+        field_name: 필드명 (효능, 부작용, 사용법 등)
+    
+    Returns:
+        병합된 정보
+    """
+    if not sources_info:
+        return "정보 없음"
+    
+    if len(sources_info) == 1:
+        return sources_info[0][1]
+    
+    try:
+        print(f"🔄 {len(sources_info)}개 소스의 {field_name} 정보 병합 중...")
+        
+        # 소스별 정보를 정리
+        sources_text = ""
+        for i, (source_name, info) in enumerate(sources_info, 1):
+            sources_text += f"\n**소스 {i} ({source_name}):**\n{info}\n"
+        
+        merge_prompt = f"""당신은 의약품 정보 전문가입니다. 여러 소스에서 수집한 {field_name} 정보를 병합하여 완전한 정보를 만들어주세요.
+
+**병합 원칙:**
+1. 중복되는 내용은 하나로 통합 (같은 의미의 내용이 여러 소스에 있으면 하나만 유지)
+2. 각 소스의 고유한 내용은 반드시 모두 포함 (소스별로 다른 정보가 있으면 모두 추가)
+3. 모든 중요한 정보를 포함 (금기사항, 주의사항, 용량 정보, 특수 사용법 등)
+4. 구체적인 수치나 용량 정보는 모두 유지
+5. 자연스러운 문장으로 통합
+6. 소스별로 약간씩 다른 표현이라도 의미가 다르면 모두 포함
+
+**수집된 {field_name} 정보 (여러 소스):**
+{sources_text}
+
+**병합된 {field_name} 정보 (중복 제거, 모든 고유 정보 포함):**
+"""
+        
+        # 캐시 확인
+        cached_response = cache_manager.get_llm_response_cache(merge_prompt, f"merge_multiple_{field_name}")
+        if cached_response:
+            merged = cached_response
+        else:
+            response = llm.invoke(merge_prompt)
+            merged = response.content if hasattr(response, 'content') else str(response)
+            # 캐시 저장
+            if merged and len(merged) > 50:
+                cache_manager.save_llm_response_cache(merge_prompt, merged, f"merge_multiple_{field_name}")
+        
+        if merged and len(merged) > 50:
+            print(f"✅ {field_name} 정보 병합 완료: {len(merged)}자 (원본: {sum(len(info) for _, info in sources_info)}자)")
+            return merged.strip()
+        else:
+            print(f"⚠️ 병합 결과가 너무 짧아 첫 번째 소스 정보 유지")
+            return sources_info[0][1]
+    
+    except Exception as e:
+        print(f"⚠️ {field_name} 정보 병합 실패, 첫 번째 소스 정보 유지: {e}")
+        return sources_info[0][1]
+
+def merge_medicine_info_with_llm(current_info: str, pdf_info: str, field_name: str) -> str:
+    """
+    LLM을 사용하여 기존 정보와 PDF 정보를 병합합니다.
+    중복 내용은 제거하고, 새로운 내용은 추가합니다.
+    
+    Args:
+        current_info: 기존 정보
+        pdf_info: PDF에서 추출한 정보
+        field_name: 필드명 (효능, 부작용, 사용법 등)
+    
+    Returns:
+        병합된 정보
+    """
+    # URL이거나 정보 없음이면 PDF 정보로 교체
+    url_pattern = r'https?://[^\s]+'
+    if current_info == "정보 없음" or re.search(url_pattern, str(current_info)):
+        return pdf_info
+    
+    # 두 정보가 비슷하면 그냥 기존 정보 유지 (불필요한 LLM 호출 방지)
+    if current_info.strip() == pdf_info.strip():
+        return current_info
+    
+    try:
+        print(f"🔄 {field_name} 정보 병합 중... (기존: {len(current_info)}자, PDF: {len(pdf_info)}자)")
+        
+        merge_prompt = f"""당신은 의약품 정보 전문가입니다. 기존 정보와 PDF에서 추출한 정보를 병합하여 완전한 {field_name} 정보를 만들어주세요.
+
+**병합 원칙:**
+1. 중복되는 내용은 하나로 통합
+2. 기존 정보에 없는 새로운 내용은 반드시 추가
+3. 모든 중요한 정보를 포함 (금기사항, 주의사항, 용량 정보 등)
+4. 구체적인 수치나 용량 정보는 모두 유지
+5. 자연스러운 문장으로 통합
+
+**기존 {field_name} 정보:**
+{current_info}
+
+**PDF에서 추출한 {field_name} 정보:**
+{pdf_info}
+
+**병합된 {field_name} 정보 (중복 제거, 신규 내용 추가):**
+"""
+        
+        # 캐시 확인
+        cached_response = cache_manager.get_llm_response_cache(merge_prompt, f"merge_{field_name}")
+        if cached_response:
+            merged = cached_response
+        else:
+            response = llm.invoke(merge_prompt)
+            merged = response.content if hasattr(response, 'content') else str(response)
+            # 캐시 저장
+            if merged and len(merged) > 50:
+                cache_manager.save_llm_response_cache(merge_prompt, merged, f"merge_{field_name}")
+        
+        if merged and len(merged) > 50:
+            print(f"✅ {field_name} 정보 병합 완료: {len(merged)}자")
+            return merged.strip()
+        else:
+            print(f"⚠️ 병합 결과가 너무 짧아 기존 정보 유지")
+            return current_info
+    
+    except Exception as e:
+        print(f"⚠️ {field_name} 정보 병합 실패, 기존 정보 유지: {e}")
+        return current_info
 
 def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict:
     """약품 사용 안전성 판단"""
@@ -337,7 +698,14 @@ def check_medicine_usage_safety(medicine_info: dict, usage_context: str) -> dict
 """
     
     try:
-        response = llm.invoke(prompt).content.strip()
+        # 캐시 확인
+        cached_response = cache_manager.get_llm_response_cache(prompt, "usage_check")
+        if cached_response:
+            response = cached_response
+        else:
+            response = llm.invoke(prompt).content.strip()
+            # 캐시 저장
+            cache_manager.save_llm_response_cache(prompt, response, "usage_check")
         print(f"🔍 LLM 응답: {response[:200]}...")
         
         # JSON 응답 파싱 (```json 제거 처리)
@@ -503,12 +871,18 @@ def generate_usage_check_response(medicine_name: str, usage_context: str, medici
 def medicine_usage_check_node(state: QAState) -> QAState:
     """약품 사용 가능성 판단 노드"""
     
-    medicine_name = state.get("medicine_name", "")
+    # ⚠️ 중요: question_refinement_node에서 보정된 약품명이 있으면 우선 사용
+    medicine_name = state.get("extracted_medicine_name") or state.get("medicine_name", "")
     usage_context = state.get("usage_context", "")
     
     if not medicine_name or not usage_context:
         state["usage_check_answer"] = "죄송합니다. 약품명이나 사용 상황 정보가 부족하여 판단할 수 없습니다."
         return state
+    
+    # 보정된 약품명으로 state 업데이트 (다음 노드에서도 사용하도록)
+    if state.get("extracted_medicine_name") and state.get("extracted_medicine_name") != state.get("medicine_name"):
+        state["medicine_name"] = medicine_name
+        print(f"✅ 보정된 약품명으로 state 업데이트: '{state.get('medicine_name', '')}' → '{medicine_name}'")
     
     print(f"🔍 약품 사용 가능성 판단 시작: {medicine_name} → {usage_context}")
     
@@ -524,6 +898,14 @@ def medicine_usage_check_node(state: QAState) -> QAState:
         return state
     
     print(f"✅ 약품 정보 발견: {medicine_info['제품명']}")
+    print(f"📊 최종 medicine_info 상태:")
+    print(f"  - 효능: {medicine_info.get('효능', '정보 없음')[:100]}... (길이: {len(str(medicine_info.get('효능', '')))})")
+    print(f"  - 부작용: {medicine_info.get('부작용', '정보 없음')[:100]}... (길이: {len(str(medicine_info.get('부작용', '')))})")
+    print(f"  - 사용법: {medicine_info.get('사용법', '정보 없음')[:100]}... (길이: {len(str(medicine_info.get('사용법', '')))})")
+    
+    # 병합된 약품 정보를 state에 저장 (enhanced_rag_system에서 사용)
+    state["merged_medicine_info"] = medicine_info
+    print(f"💾 병합된 약품 정보 state 저장 완료: {medicine_info.get('제품명', '')} (효능: {len(str(medicine_info.get('효능', '')))}자, 부작용: {len(str(medicine_info.get('부작용', '')))}자)")
     
     # 사용 안전성 판단
     print("🔍 사용 안전성 판단 중...")

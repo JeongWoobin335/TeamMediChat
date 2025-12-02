@@ -4,6 +4,7 @@ import requests
 import json
 import time
 from typing import Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from cache_manager import cache_manager
 from translation_rag import TranslationRAG
 
@@ -262,13 +263,14 @@ class PubChemAPI:
     
     def get_compound_xrefs(self, compound_name: str) -> Dict:
         """외부 데이터베이스 참조 정보 가져오기"""
-        cache_key = f"pubchem_xrefs_{compound_name}"
-        url = f"{self.base_url}/compound/name/{compound_name}/xrefs/JSON"
+        english_name = self._get_english_name(compound_name)
+        cache_key = f"pubchem_xrefs_{english_name}"
+        url = f"{self.base_url}/compound/name/{english_name}/xrefs/JSON"
         
         return self._make_request(url, cache_key)
     
     def analyze_ingredient_comprehensive(self, ingredient_name: str) -> Dict:
-        """성분 종합 분석 (개선된 버전)"""
+        """성분 종합 분석 (병렬 처리 버전)"""
         print(f"🔍 PubChem 종합 분석: {ingredient_name}")
         
         result = {
@@ -284,28 +286,87 @@ class PubChemAPI:
         }
         
         try:
-            # 1. CID 가져오기
+            # 1. CID 가져오기 (먼저 실행, 다른 정보 수집에 필요)
             result['cid'] = self.get_compound_cid(ingredient_name)
+            english_name = result['english_name']
             
-            # 2. 기본 정보 (분자식, 분자량 등)
-            print("  📊 기본 정보 수집...")
-            result['basic_info'] = self.get_compound_basic_info(ingredient_name)
+            if not result['cid']:
+                print(f"⚠️ CID를 찾을 수 없어 추가 정보 수집 불가: {ingredient_name}")
+                return result
             
-            # 3. 약리학 정보 (작용기전, 효능 등) - PUG View API 사용
-            print("  📋 약리학 정보 수집...")
-            result['pharmacology_info'] = self.get_compound_pharmacology_info(ingredient_name)
+            # 2-6. 나머지 정보들을 병렬로 수집
+            print("  🔄 병렬 정보 수집 시작...")
             
-            # 4. 설명 정보
-            print("  📝 설명 정보 수집...")
-            result['description'] = self.get_compound_description(ingredient_name)
+            def collect_basic_info():
+                """기본 정보 수집"""
+                try:
+                    print("  📊 기본 정보 수집 중...")
+                    return self.get_compound_basic_info(ingredient_name)
+                except Exception as e:
+                    print(f"⚠️ 기본 정보 수집 오류: {e}")
+                    return {}
             
-            # 5. 동의어 목록
-            print("  🔤 동의어 목록 수집...")
-            result['synonyms'] = self.get_compound_synonyms(ingredient_name)
+            def collect_pharmacology_info():
+                """약리학 정보 수집"""
+                try:
+                    print("  📋 약리학 정보 수집 중...")
+                    return self.get_compound_pharmacology_info(ingredient_name)
+                except Exception as e:
+                    print(f"⚠️ 약리학 정보 수집 오류: {e}")
+                    return {}
             
-            # 6. 외부 참조
-            print("  🔗 외부 참조 수집...")
-            result['xrefs'] = self.get_compound_xrefs(ingredient_name)
+            def collect_description():
+                """설명 정보 수집"""
+                try:
+                    print("  📝 설명 정보 수집 중...")
+                    return self.get_compound_description(ingredient_name)
+                except Exception as e:
+                    print(f"⚠️ 설명 정보 수집 오류: {e}")
+                    return ''
+            
+            def collect_synonyms():
+                """동의어 목록 수집"""
+                try:
+                    print("  🔤 동의어 목록 수집 중...")
+                    return self.get_compound_synonyms(ingredient_name)
+                except Exception as e:
+                    print(f"⚠️ 동의어 목록 수집 오류: {e}")
+                    return []
+            
+            def collect_xrefs():
+                """외부 참조 수집"""
+                try:
+                    print("  🔗 외부 참조 수집 중...")
+                    return self.get_compound_xrefs(ingredient_name)
+                except Exception as e:
+                    print(f"⚠️ 외부 참조 수집 오류: {e}")
+                    return {}
+            
+            # 병렬 실행
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                futures = {
+                    executor.submit(collect_basic_info): 'basic_info',
+                    executor.submit(collect_pharmacology_info): 'pharmacology_info',
+                    executor.submit(collect_description): 'description',
+                    executor.submit(collect_synonyms): 'synonyms',
+                    executor.submit(collect_xrefs): 'xrefs'
+                }
+                
+                # 결과 수집
+                for future in as_completed(futures):
+                    key = futures[future]
+                    try:
+                        result[key] = future.result()
+                        print(f"  ✅ {key} 수집 완료")
+                    except Exception as e:
+                        print(f"  ❌ {key} 수집 실패: {e}")
+                        # 기본값 설정
+                        if key == 'description':
+                            result[key] = ''
+                        elif key == 'synonyms':
+                            result[key] = []
+                        else:
+                            result[key] = {}
             
             print(f"✅ PubChem 분석 완료: {ingredient_name}")
             
