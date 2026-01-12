@@ -94,9 +94,9 @@ TeamMediChat은 실시간 대화를 통해 사용자의 약품 사용에 대한 
 
 ### 기술 스택
 
-- **백엔드**: FastAPI, WebSocket, 기존 LangGraph 시스템
-- **프론트엔드**: HTML5, CSS3, JavaScript, Font Awesome
-- **통신**: WebSocket (실시간), REST API (세션 관리)
+- **백엔드**: FastAPI, WebSocket, LangGraph
+- **프론트엔드**: HTML5, CSS3, JavaScript
+- **통신**: WebSocket (실시간)
 
 ## 설치 및 실행
 
